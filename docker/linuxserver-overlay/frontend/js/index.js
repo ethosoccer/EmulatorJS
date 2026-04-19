@@ -65,7 +65,7 @@ function getFavorites() {
         }
         return favorite;
       }).filter(function(favorite) {
-        return favorite && favorite.id;
+        return favorite && favorite.id && favorite.id !== 'undefined' && favorite.id.indexOf('undefined::') !== 0;
       });
     }
   } catch(e) {
@@ -76,18 +76,14 @@ function getFavorites() {
 function saveFavorites(favorites) {
   localStorage.setItem('ejsFavorites', JSON.stringify(favorites));
 }
-function favoriteRecord(favoriteId) {
-  var $item = $('.favorite-toggle').filter(function() {
-    return this.dataset.favoriteId === favoriteId;
-  }).closest('.menu-wrap').find('a').first();
-  var activeIndex = Number(($item.attr('id') || '').replace('i', ''));
-  var config = $('#menu').data('config') || {};
+function readFavoriteRecord(button, favoriteId) {
+  var $button = $(button);
   return {
     id: favoriteId,
-    name: $item.data('name') || favoriteId.split('::').slice(1).join('::') || favoriteId,
-    root: config.root || window.location.hash.replace('#','').split('---')[0] || 'main',
-    title: config.title || config.root || 'Games',
-    index: isNaN(activeIndex) ? 0 : activeIndex
+    name: $button.attr('data-favorite-name') || favoriteId.split('::').slice(1).join('::') || favoriteId,
+    root: $button.attr('data-favorite-root') || 'main',
+    title: $button.attr('data-favorite-title') || 'Games',
+    index: Number($button.attr('data-favorite-index') || 0)
   };
 }
 function isFavorite(favoriteId) {
@@ -103,10 +99,13 @@ function setFavoriteButtonState(favoriteId) {
     $(this).attr('title', active ? 'Remove from favorites' : 'Add to favorites');
   });
 }
-function toggleFavorite(event, favoriteId) {
+function toggleFavorite(event, favoriteId, button) {
   if (event) {
     event.preventDefault();
     event.stopPropagation();
+  }
+  if (!favoriteId || favoriteId === 'undefined') {
+    return;
   }
   var favorites = getFavorites();
   var favoriteIds = favorites.map(function(favorite) {
@@ -114,7 +113,7 @@ function toggleFavorite(event, favoriteId) {
   });
   var index = favoriteIds.indexOf(favoriteId);
   if (index === -1) {
-    favorites.push(favoriteRecord(favoriteId));
+    favorites.push(readFavoriteRecord(button, favoriteId));
   } else {
     favorites.splice(index, 1);
   }
@@ -661,10 +660,11 @@ async function rendermenu(datas) {
     };
     var itemType = item.hasOwnProperty('type') ? item.type : data.defaults.type;
     var itemPath = item.hasOwnProperty('path') ? item.path : data.defaults.path;
+    var itemTitle = data.title || itemPath || 'Games';
     var favoriteId = itemPath + '::' + romName;
     var favoriteButton = '';
     if (itemType == 'game') {
-      favoriteButton = '<button class="favorite-toggle" type="button" data-favorite-id="' + escapeHtml(favoriteId) + '" onclick="toggleFavorite(event, this.dataset.favoriteId)" aria-label="Toggle favorite" title="Add to favorites">&hearts;</button>';
+      favoriteButton = '<button class="favorite-toggle" type="button" data-favorite-id="' + escapeHtml(favoriteId) + '" data-favorite-name="' + escapeHtml(romName) + '" data-favorite-root="' + escapeHtml(root) + '" data-favorite-title="' + escapeHtml(itemTitle) + '" data-favorite-index="' + count + '" onclick="toggleFavorite(event, this.getAttribute(\'data-favorite-id\'), this)" aria-label="Toggle favorite" title="Add to favorites">&hearts;</button>';
     }
     $('#games-list').append('\
       <div id="m' + count + '">\

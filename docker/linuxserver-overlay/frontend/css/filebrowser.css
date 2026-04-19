@@ -233,8 +233,44 @@ tr:hover {
     padding: 12px;
   }
 
+  #profileButtons,
+  #loginEntry,
+  #syncButtons,
+  .file-actions {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  #profileButtons {
+    align-items: stretch;
+  }
+
+  #username {
+    margin: 0;
+  }
+
   #syncButtons {
     margin-left: 0;
+  }
+
+  input,
+  select,
+  button {
+    width: 100%;
+  }
+
+  .right {
+    float: none;
+    margin-right: 0;
+  }
+
+  .file-header {
+    display: block;
+  }
+
+  .file-header h1 {
+    font-size: 26px;
   }
 
   .fileTable {

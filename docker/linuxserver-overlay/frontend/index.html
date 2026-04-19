@@ -6,22 +6,26 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="apple-touch-icon" href="icon.png" crossorigin="use-credentials">
     <link rel="manifest" href="manifest.json" crossorigin="use-credentials">
-    <link rel="stylesheet" href="css/index.css?v=20260419-profile-sync">
+    <link rel="stylesheet" href="css/index.css?v=20260419-mobile-toolbar">
     <script src="js/vendor/jquery.min.js"></script>
     <script src="js/vendor/hammer.min.js"></script>
     <script src="js/vendor/browserfs.min.js"></script>
     <script src="js/vendor/jszip.min.js"></script>
-    <script src="js/index.js?v=20260419-profile-sync"></script>
+    <script src="js/index.js?v=20260419-mobile-toolbar"></script>
   </head>
   <body>
     <div id="menu">
-      <a target="_blank" href="filebrowser.html">
-        <img class="file-button" src="css/folder.svg"/>
-      </a>
-      <img class="full-main" onclick="fullscreen()" src="css/fullscreen.svg"/>
-      <button id="search-button" class="menu-tool menu-search" type="button" onclick="openSearchPanel()">Search</button>
-      <button id="favorites-button" class="menu-tool menu-favorites" type="button" onclick="showFavorites()">Favorites</button>
-      <button id="login-button" class="menu-tool menu-login" type="button" onclick="openLoginPanel()">Login</button>
+      <div class="menu-toolbar">
+        <a class="icon-tool" target="_blank" href="filebrowser.html">
+          <img class="file-button" src="css/folder.svg"/>
+        </a>
+        <button class="icon-tool" type="button" onclick="fullscreen()" aria-label="Fullscreen">
+          <img class="full-main" src="css/fullscreen.svg"/>
+        </button>
+        <button id="search-button" class="menu-tool menu-search" type="button" onclick="openSearchPanel()">Search</button>
+        <button id="favorites-button" class="menu-tool menu-favorites" type="button" onclick="showFavorites()">Favorites</button>
+        <button id="login-button" class="menu-tool menu-login" type="button" onclick="openLoginPanel()">Login</button>
+      </div>
       <div id="search-panel" class="search-panel hidden">
         <div class="search-header">
           <h2>Find Games</h2>

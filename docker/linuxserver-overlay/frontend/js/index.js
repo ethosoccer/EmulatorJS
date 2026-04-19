@@ -177,6 +177,7 @@ async function profileLogin() {
       $('#profile-user').val('');
       updateLoginState();
       await pullServerProfile(true);
+      window.location.reload();
     } else {
       setProfileStatus('Bad login.');
     }
@@ -334,6 +335,7 @@ async function pullServerProfile(silent) {
     }
     if (!silent) {
       alert('Pulled from server');
+      window.location.reload();
     }
   } catch(e) {
     console.log(e);
@@ -342,6 +344,9 @@ async function pullServerProfile(silent) {
 }
 async function pushServerProfile(silent) {
   if (profilePushInFlight || !localStorage.getItem('user') || !localStorage.getItem('pass')) {
+    return;
+  }
+  if (silent && window.location.hash !== '#game' && document.visibilityState === 'visible') {
     return;
   }
   profilePushInFlight = true;
@@ -360,6 +365,7 @@ async function pushServerProfile(silent) {
     setProfileStatus(json.status == 'success' ? 'Pushed to server.' : 'Error pushing profile.');
     if (!silent && json.status == 'success') {
       alert('Pushed to server');
+      window.location.reload();
     }
   } catch(e) {
     console.log(e);
@@ -369,6 +375,10 @@ async function pushServerProfile(silent) {
 }
 function queueProfilePush() {
   if (!localStorage.getItem('user') || !localStorage.getItem('pass')) {
+    return;
+  }
+  if (window.location.hash !== '#game' && document.visibilityState === 'visible') {
+    setProfileStatus('Saved locally. Use Push to Server to sync now.');
     return;
   }
   clearTimeout(profilePushTimeout);
@@ -381,7 +391,9 @@ function scheduleProfileAutoPush() {
     return;
   }
   profilePushTimer = setInterval(function() {
-    pushServerProfile(true);
+    if (window.location.hash === '#game' || document.visibilityState === 'hidden') {
+      pushServerProfile(true);
+    }
   }, 300000);
 }
 function readFavoriteRecord(button, favoriteId) {
@@ -1408,9 +1420,6 @@ async function loadjson(name, active_item) {
 window.onload = function() {
   updateLoginState();
   loadPublicSettings();
-  setupProfileFs().catch(function(e) {
-    console.log(e);
-  });
   $('#game-search').on('input', debounce(runGameSearch, 150));
   $('#console-filter').on('change', runGameSearch);
   $('#art-filter').on('change', runGameSearch);

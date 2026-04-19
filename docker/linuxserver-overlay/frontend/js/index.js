@@ -51,18 +51,44 @@ function escapeHtml(value) {
   });
 }
 function getFavoriteIds() {
+  return getFavorites().map(function(favorite) {
+    return favorite.id;
+  });
+}
+function getFavorites() {
   try {
     var favorites = JSON.parse(localStorage.getItem('ejsFavorites') || '[]');
     if (Array.isArray(favorites)) {
-      return favorites;
+      return favorites.map(function(favorite) {
+        if (typeof favorite === 'string') {
+          return {id: favorite};
+        }
+        return favorite;
+      }).filter(function(favorite) {
+        return favorite && favorite.id;
+      });
     }
   } catch(e) {
     console.log(e);
   }
   return [];
 }
-function saveFavoriteIds(favorites) {
+function saveFavorites(favorites) {
   localStorage.setItem('ejsFavorites', JSON.stringify(favorites));
+}
+function favoriteRecord(favoriteId) {
+  var $item = $('.favorite-toggle').filter(function() {
+    return this.dataset.favoriteId === favoriteId;
+  }).closest('.menu-wrap').find('a').first();
+  var activeIndex = Number(($item.attr('id') || '').replace('i', ''));
+  var config = $('#menu').data('config') || {};
+  return {
+    id: favoriteId,
+    name: $item.data('name') || favoriteId.split('::').slice(1).join('::') || favoriteId,
+    root: config.root || window.location.hash.replace('#','').split('---')[0] || 'main',
+    title: config.title || config.root || 'Games',
+    index: isNaN(activeIndex) ? 0 : activeIndex
+  };
 }
 function isFavorite(favoriteId) {
   return getFavoriteIds().indexOf(favoriteId) !== -1;
@@ -82,14 +108,17 @@ function toggleFavorite(event, favoriteId) {
     event.preventDefault();
     event.stopPropagation();
   }
-  var favorites = getFavoriteIds();
-  var index = favorites.indexOf(favoriteId);
+  var favorites = getFavorites();
+  var favoriteIds = favorites.map(function(favorite) {
+    return favorite.id;
+  });
+  var index = favoriteIds.indexOf(favoriteId);
   if (index === -1) {
-    favorites.push(favoriteId);
+    favorites.push(favoriteRecord(favoriteId));
   } else {
     favorites.splice(index, 1);
   }
-  saveFavoriteIds(favorites);
+  saveFavorites(favorites);
   setFavoriteButtonState(favoriteId);
   if (!$('#search-panel').hasClass('hidden')) {
     runGameSearch();
@@ -138,9 +167,14 @@ function renderFavoritesPanel() {
     $('#favorites-status').text('Loading favorites...');
     return;
   }
-  var favorites = getFavoriteIds();
-  var favoriteItems = searchCatalog.items.filter(function(item) {
-    return favorites.indexOf(item.id) !== -1;
+  var favorites = getFavorites();
+  var favoriteItems = favorites.map(function(favorite) {
+    var catalogMatch = searchCatalog.items.find(function(item) {
+      return item.id === favorite.id;
+    });
+    return catalogMatch || favorite;
+  }).filter(function(favorite) {
+    return favorite && favorite.id;
   });
   $('#favorites-results').empty();
   if (favoriteItems.length === 0) {
@@ -150,9 +184,11 @@ function renderFavoritesPanel() {
   $('#favorites-status').text(favoriteItems.length + ' favorite' + (favoriteItems.length === 1 ? '' : 's'));
   for (var item of favoriteItems) {
     var row = $('<div>').addClass('favorite-result-row');
-    var openButton = $('<button>').addClass('search-result').attr('type', 'button').attr('onclick', 'openFavoriteResult("' + item.root + '",' + item.index + ')');
+    var root = item.root || 'main';
+    var index = Number(item.index || 0);
+    var openButton = $('<button>').addClass('search-result').attr('type', 'button').attr('onclick', 'openFavoriteResult("' + root + '",' + index + ')');
     openButton.append($('<span>').addClass('search-result-title').html('&hearts; ' + escapeHtml(item.name)));
-    openButton.append($('<span>').addClass('search-result-meta').text(item.title));
+    openButton.append($('<span>').addClass('search-result-meta').text(item.title || item.root || 'Games'));
     var removeButton = $('<button>').addClass('favorite-remove').attr('type', 'button').attr('title', 'Remove from favorites').text('Remove');
     removeButton.on('click', function(favoriteId) {
       return function(event) {

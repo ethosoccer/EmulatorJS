@@ -170,9 +170,51 @@ function idbRead(dbName, storeName, reader) {
   });
 }
 async function idbGetKeys(dbName, storeName) {
-  return await idbRead(dbName, storeName, function(store) {
-    return store.getAllKeys ? store.getAllKeys() : store.openKeyCursor();
-  }) || [];
+  if (!window.indexedDB) {
+    return [];
+  }
+  if (IDBObjectStore.prototype.getAllKeys) {
+    return await idbRead(dbName, storeName, function(store) {
+      return store.getAllKeys();
+    }) || [];
+  }
+  return new Promise(function(resolve) {
+    var request = indexedDB.open(dbName);
+    request.onerror = function() {
+      resolve([]);
+    };
+    request.onsuccess = function() {
+      var db = request.result;
+      if (!db.objectStoreNames.contains(storeName)) {
+        db.close();
+        resolve([]);
+        return;
+      }
+      var keys = [];
+      try {
+        var tx = db.transaction(storeName, 'readonly');
+        var store = tx.objectStore(storeName);
+        var cursor = store.openKeyCursor();
+        cursor.onsuccess = function() {
+          var result = cursor.result;
+          if (result) {
+            keys.push(result.key);
+            result.continue();
+          }
+        };
+        cursor.onerror = function() {
+          resolve(keys);
+        };
+        tx.oncomplete = function() {
+          db.close();
+          resolve(keys);
+        };
+      } catch(e) {
+        db.close();
+        resolve(keys);
+      }
+    };
+  });
 }
 async function idbGetValue(dbName, storeName, key) {
   return await idbRead(dbName, storeName, function(store) {
@@ -186,10 +228,46 @@ function saveBasename(value) {
 function saveMatchKey(value) {
   return saveBasename(value).toLowerCase().replace(/[^a-z0-9]+/g, '');
 }
+function quickSaveMirrorKey(gameName, slot) {
+  return saveBasename(gameName || 'game') + '.slot' + (slot || 1) + '.quick.state';
+}
 function saveRecordMatchesGame(record, gameBase) {
   var gameKey = saveMatchKey(gameBase);
   var saveKey = saveMatchKey(record.name || record.key || '');
   return gameKey && saveKey && (saveKey.indexOf(gameKey) !== -1 || gameKey.indexOf(saveKey) !== -1);
+}
+function installQuickSaveMirror(gameName) {
+  var attempts = 0;
+  var timer = setInterval(function() {
+    attempts++;
+    var emulator = window.EJS_emulator;
+    var gameManager = emulator && emulator.gameManager;
+    if (!gameManager || !gameManager.quickSave || !emulator.storage || !emulator.storage.states) {
+      if (attempts > 100) {
+        clearInterval(timer);
+      }
+      return;
+    }
+    clearInterval(timer);
+    if (gameManager.quickSave.__ejsSaveMirrorInstalled) {
+      return;
+    }
+    var originalQuickSave = gameManager.quickSave.bind(gameManager);
+    gameManager.quickSave = function(slot) {
+      var saveSlot = slot || 1;
+      var saved = originalQuickSave(saveSlot);
+      if (saved) {
+        try {
+          var data = gameManager.FS.readFile('/' + saveSlot + '-quick.state');
+          emulator.storage.states.put(quickSaveMirrorKey(gameName, saveSlot), data);
+        } catch(e) {
+          console.log('Unable to mirror quick save', e);
+        }
+      }
+      return saved;
+    };
+    gameManager.quickSave.__ejsSaveMirrorInstalled = true;
+  }, 100);
 }
 function formatBytes(size) {
   if (!size && size !== 0) {
@@ -1145,6 +1223,7 @@ function launch(active_item) {
     var path =  selected.data('path');
     var rom_path = 'user/' + path + '/roms/';
     var rom_extension = selected.data('rom_extension');
+    var gameSaveName = name + rom_extension;
     var bios = 'user/' + path + '/bios/' + selected.data('bios');
     // Clear screen
     $('body').empty();
@@ -1157,8 +1236,16 @@ function launch(active_item) {
     }
     EJS_player = '#game';
     EJS_gameUrl = encodeURI(rom_path + name + rom_extension);
+    EJS_gameName = gameSaveName;
     EJS_core = emulator;
     EJS_pathtodata = 'data/';
+    var previousGameStart = EJS_onGameStart;
+    EJS_onGameStart = function() {
+      if (typeof previousGameStart === 'function') {
+        previousGameStart();
+      }
+      installQuickSaveMirror(gameSaveName);
+    };
     // Load touch screen interface
     if ((! EJSemu) && (window.orientation !== undefined) && localStorage.getItem('touchpad') !== 'false' && !navigator.getGamepads()?.[0]) {
       // Determine type to render

@@ -744,11 +744,13 @@ function loadlogos(logo_load_start, display_items, items_length, active_item) {
 };
 // Launcher
 function launch(active_item) {
-  var name = $('#i' + active_item.toString()).data('name');
-  var type = $('#i' + active_item.toString()).data('type');
-  var multi = $('#i' + active_item.toString()).data('multi_disc');
+  var selected = active_item && active_item.nodeType ? $(active_item) : $('#i' + active_item.toString()).first();
+  var selectedIndex = selected.attr('id') ? Number(selected.attr('id').replace('i', '')) : Number(active_item);
+  var name = selected.data('name');
+  var type = selected.data('type');
+  var multi = selected.data('multi_disc');
   var root = $('#menu').data('root');
-  var originalActiveItem = Number($('#i' + active_item.toString()).attr('data-original-index') || active_item);
+  var originalActiveItem = Number(selected.attr('data-original-index') || selectedIndex);
   $(document).attr('title', name);
   if (type == 'menu') {
     window.location.href = '#' + name
@@ -777,7 +779,7 @@ function launch(active_item) {
     window.location.href = '#game';
     $(document).off('keydown');
     // Default variables for emulator
-    var emulator = $('#i' + active_item.toString()).data('emulator');
+    var emulator = selected.data('emulator');
     if (emulator.startsWith('libretro-')) {
       var emulator = emulator.replace('libretro-','');
       var script = 'js/libretro.js'
@@ -802,10 +804,10 @@ function launch(active_item) {
         document.querySelectorAll('[data-btn="fullscreen"]')[0].click();
       }
     };
-    var path =  $('#i' + active_item.toString()).data('path');
+    var path =  selected.data('path');
     var rom_path = 'user/' + path + '/roms/';
-    var rom_extension = $('#i' + active_item.toString()).data('rom_extension');
-    var bios = 'user/' + path + '/bios/' + $('#i' + active_item.toString()).data('bios');
+    var rom_extension = selected.data('rom_extension');
+    var bios = 'user/' + path + '/bios/' + selected.data('bios');
     // Clear screen
     $('body').empty();
     // Add game window
@@ -1033,7 +1035,7 @@ async function rendermenu(datas) {
       $('#games-list').append('\
         <div id="m' + count + '">\
           <div id="h' + count + '" class="menu-wrap ' + shrink + '">\
-            <a onclick="launch(\'' + count + '\')" id="i' + count + '" ' + jsdata + '>\
+            <a onclick="launch(this)" id="i' + count + '" ' + jsdata + '>\
               ' + logo_html + '\
             </a>' + favoriteButton + '\
           </div>\

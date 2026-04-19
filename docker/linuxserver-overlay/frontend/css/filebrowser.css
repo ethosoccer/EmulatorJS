@@ -215,7 +215,6 @@ button:hover {
 
 .deleteButton {
   margin: 0 !important;
-  float: right;
   color: var(--danger);
 }
 
@@ -235,6 +234,11 @@ th {
   border-bottom: 1px solid var(--line);
   padding: 10px;
   text-align: left;
+}
+
+td:last-child,
+th:last-child {
+  text-align: right;
 }
 
 th {

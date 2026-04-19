@@ -6,12 +6,12 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="apple-touch-icon" href="icon.png" crossorigin="use-credentials">
     <link rel="manifest" href="manifest.json" crossorigin="use-credentials">
-    <link rel="stylesheet" href="css/index.css?v=20260419-console-filter">
+    <link rel="stylesheet" href="css/index.css?v=20260419-console-back">
     <script src="js/vendor/jquery.min.js"></script>
     <script src="js/vendor/hammer.min.js"></script>
     <script src="js/vendor/browserfs.min.js"></script>
     <script src="js/vendor/jszip.min.js"></script>
-    <script src="js/index.js?v=20260419-fresh-config"></script>
+    <script src="js/index.js?v=20260419-console-back"></script>
   </head>
   <body>
     <div id="menu">
@@ -22,6 +22,7 @@
         <button class="icon-tool" type="button" onclick="fullscreen()" aria-label="Fullscreen">
           <img class="full-main" src="css/fullscreen.svg"/>
         </button>
+        <button id="console-back-button" class="menu-tool menu-back hidden" type="button" onclick="goBackToMain()">Back</button>
         <button id="search-button" class="menu-tool menu-search" type="button" onclick="openSearchPanel()">Search</button>
         <button id="favorites-button" class="menu-tool menu-favorites" type="button" onclick="showFavorites()">Favorites</button>
         <button id="login-button" class="menu-tool menu-login" type="button" onclick="openLoginPanel()">Login</button>

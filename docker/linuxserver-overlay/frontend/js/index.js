@@ -691,6 +691,21 @@ function openFavoriteResult(root, index) {
 function clearConsoleListFilter() {
   $('#console-list-search').val('').trigger('input');
 }
+function goBackToMain() {
+  closeSearchPanel();
+  closeFavoritesPanel();
+  closeLoginPanel();
+  $('#console-list-search').val('');
+  if (window.location.hash === '#main') {
+    loadjson('main');
+  } else {
+    window.location.href = '#main';
+  }
+}
+function updateConsoleBackButton(root, data) {
+  var showBack = root !== 'main' && !(data.hasOwnProperty('multi_name') && hasUsableValue(data.multi_name));
+  $('#console-back-button').toggleClass('hidden', !showBack);
+}
 // Load and play video
 var loadvideo = debounce(function(active_item) {
   var name = $('#i' + active_item.toString()).data('name');
@@ -909,6 +924,7 @@ async function rendermenu(datas) {
   $('#menu').data('config', data);
   var root = data.root;
   $('#menu').data('root', root);
+  updateConsoleBackButton(root, data);
   var parent = data.parent;
   var allItems = {};
   var originalIndexByName = {};

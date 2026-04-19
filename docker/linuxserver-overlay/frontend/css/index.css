@@ -45,6 +45,10 @@ canvas {
   display: none;
 }
 
+#console-back-button.hidden {
+  display: none;
+}
+
 #console-list-tools.hidden {
   display: none;
 }

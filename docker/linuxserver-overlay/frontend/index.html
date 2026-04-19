@@ -6,10 +6,10 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="apple-touch-icon" href="icon.png" crossorigin="use-credentials">
     <link rel="manifest" href="manifest.json" crossorigin="use-credentials">
-    <link rel="stylesheet" href="css/index.css?v=20260419-search-favorites">
+    <link rel="stylesheet" href="css/index.css?v=20260419-favorites-panel">
     <script src="js/vendor/jquery.min.js"></script>
     <script src="js/vendor/hammer.min.js"></script>
-    <script src="js/index.js?v=20260419-search-favorites"></script>
+    <script src="js/index.js?v=20260419-favorites-panel"></script>
   </head>
   <body>
     <div id="menu">
@@ -48,6 +48,14 @@
         </div>
         <div id="search-status" class="search-status">Type a title or open favorites.</div>
         <div id="search-results" class="search-results"></div>
+      </div>
+      <div id="favorites-panel" class="favorites-panel hidden">
+        <div class="search-header">
+          <h2>Favorites</h2>
+          <button type="button" onclick="closeFavoritesPanel()">Close</button>
+        </div>
+        <div id="favorites-status" class="search-status">Loading favorites...</div>
+        <div id="favorites-results" class="search-results"></div>
       </div>
       <video autoplay muted loop id="bgvid">
         <source id="vid" type="video/mp4">

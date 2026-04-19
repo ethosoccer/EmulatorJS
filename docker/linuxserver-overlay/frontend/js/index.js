@@ -94,8 +94,12 @@ function toggleFavorite(event, favoriteId) {
   if (!$('#search-panel').hasClass('hidden')) {
     runGameSearch();
   }
+  if (!$('#favorites-panel').hasClass('hidden')) {
+    renderFavoritesPanel();
+  }
 }
 function openSearchPanel() {
+  closeFavoritesPanel();
   $('#search-panel').removeClass('hidden');
   ensureSearchCatalog().then(function() {
     runGameSearch();
@@ -106,6 +110,9 @@ function openSearchPanel() {
 }
 function closeSearchPanel() {
   $('#search-panel').addClass('hidden');
+}
+function closeFavoritesPanel() {
+  $('#favorites-panel').addClass('hidden');
 }
 function toggleAdvancedSearch() {
   $('#advanced-search').toggleClass('hidden');
@@ -118,12 +125,43 @@ function clearGameSearch() {
   runGameSearch();
 }
 function showFavorites() {
-  $('#search-panel').removeClass('hidden');
-  $('#advanced-search').removeClass('hidden');
-  $('#favorites-filter').prop('checked', true);
+  closeSearchPanel();
+  $('#favorites-panel').removeClass('hidden');
+  $('#favorites-status').text('Loading favorites...');
+  $('#favorites-results').empty();
   ensureSearchCatalog().then(function() {
-    runGameSearch();
+    renderFavoritesPanel();
   });
+}
+function renderFavoritesPanel() {
+  if (!searchCatalog) {
+    $('#favorites-status').text('Loading favorites...');
+    return;
+  }
+  var favorites = getFavoriteIds();
+  var favoriteItems = searchCatalog.items.filter(function(item) {
+    return favorites.indexOf(item.id) !== -1;
+  });
+  $('#favorites-results').empty();
+  if (favoriteItems.length === 0) {
+    $('#favorites-status').text('No favorites yet. Use the heart beside a game to add one.');
+    return;
+  }
+  $('#favorites-status').text(favoriteItems.length + ' favorite' + (favoriteItems.length === 1 ? '' : 's'));
+  for (var item of favoriteItems) {
+    var row = $('<div>').addClass('favorite-result-row');
+    var openButton = $('<button>').addClass('search-result').attr('type', 'button').attr('onclick', 'openFavoriteResult("' + item.root + '",' + item.index + ')');
+    openButton.append($('<span>').addClass('search-result-title').html('&hearts; ' + escapeHtml(item.name)));
+    openButton.append($('<span>').addClass('search-result-meta').text(item.title));
+    var removeButton = $('<button>').addClass('favorite-remove').attr('type', 'button').attr('title', 'Remove from favorites').text('Remove');
+    removeButton.on('click', function(favoriteId) {
+      return function(event) {
+        toggleFavorite(event, favoriteId);
+      };
+    }(item.id));
+    row.append(openButton, removeButton);
+    $('#favorites-results').append(row);
+  }
 }
 function resolveItem(item, defaults) {
   var resolved = {};
@@ -281,6 +319,10 @@ function openSearchResult(root, index) {
   } else {
     window.location.href = target;
   }
+}
+function openFavoriteResult(root, index) {
+  closeFavoritesPanel();
+  openSearchResult(root, index);
 }
 // Load and play video
 var loadvideo = debounce(function(active_item) {

@@ -40,7 +40,9 @@ The overlay also replaces the LinuxServer helper app's frontend menu assets in `
 
 The game browser now has top-left Search and Favorites controls. Search builds a browser-side catalog from the configured console JSON files, so it can find games across consoles without changing ROM metadata.
 
-Advanced filters include console, logo artwork status, preview video status, and favorites-only. Favorites are stored in browser `localStorage` using the console path and game name, and games can be toggled from the visible game list with the heart button.
+Advanced search filters include console, logo artwork status, preview video status, and favorites-only.
+
+Favorites are stored in browser `localStorage` using the console path and game name. Games can be toggled from the visible game list with the heart button, and the Favorites control opens a separate popup with the full saved list and per-game remove buttons.
 
 ### Frontend Cache Policy
 

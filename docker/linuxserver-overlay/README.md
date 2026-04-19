@@ -30,6 +30,18 @@ The admin UI now has a more modern responsive layout, refreshed buttons/cards/li
 
 The popup modal was updated to be responsive and user-resizable. It uses viewport-aware sizing, minimum dimensions, scrolling content, and a visible bottom-right resize indicator.
 
+### Frontend Search And Favorites
+
+The overlay also replaces the LinuxServer helper app's frontend menu assets in `/emulatorjs/frontend`:
+
+- `frontend/index.html`
+- `frontend/css/index.css`
+- `frontend/js/index.js`
+
+The game browser now has top-left Search and Favorites controls. Search builds a browser-side catalog from the configured console JSON files, so it can find games across consoles without changing ROM metadata.
+
+Advanced filters include console, logo artwork status, preview video status, and favorites-only. Favorites are stored in browser `localStorage` using the console path and game name, and games can be toggled from the visible game list with the heart button.
+
 ## Build
 
 From the repository root:

@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="apple-touch-icon" href="icon.png" crossorigin="use-credentials">
+    <link rel="manifest" href="manifest.json" crossorigin="use-credentials">
+    <link rel="stylesheet" href="css/index.css">
+    <script src="js/vendor/jquery.min.js"></script>
+    <script src="js/vendor/hammer.min.js"></script>
+    <script src="js/index.js"></script>
+  </head>
+  <body>
+    <div id="menu">
+      <a target="_blank" href="filebrowser.html">
+        <img class="file-button" src="css/folder.svg"/>
+      </a>
+      <img class="full-main" onclick="fullscreen()" src="css/fullscreen.svg"/>
+      <button id="search-button" class="menu-tool menu-search" type="button" onclick="openSearchPanel()">Search</button>
+      <button id="favorites-button" class="menu-tool menu-favorites" type="button" onclick="showFavorites()">Favorites</button>
+      <div id="search-panel" class="search-panel hidden">
+        <div class="search-header">
+          <h2>Find Games</h2>
+          <button type="button" onclick="closeSearchPanel()">Close</button>
+        </div>
+        <input id="game-search" type="search" placeholder="Search games" autocomplete="off">
+        <div class="search-actions">
+          <button type="button" onclick="runGameSearch()">Search</button>
+          <button type="button" onclick="clearGameSearch()">Clear</button>
+        </div>
+        <button id="advanced-search-toggle" type="button" onclick="toggleAdvancedSearch()">Advanced filters</button>
+        <div id="advanced-search" class="advanced-search hidden">
+          <label for="console-filter">Console</label>
+          <select id="console-filter"></select>
+          <label for="art-filter">Artwork</label>
+          <select id="art-filter">
+            <option value="all">Any artwork status</option>
+            <option value="has-logo">Has logo art</option>
+            <option value="missing-logo">Missing logo art</option>
+            <option value="has-video">Has preview video</option>
+            <option value="missing-video">Missing preview video</option>
+          </select>
+          <label class="checkbox-filter">
+            <input id="favorites-filter" type="checkbox">
+            Favorites only
+          </label>
+        </div>
+        <div id="search-status" class="search-status">Type a title or open favorites.</div>
+        <div id="search-results" class="search-results"></div>
+      </div>
+      <video autoplay muted loop id="bgvid">
+        <source id="vid" type="video/mp4">
+      </video>
+      <img id="background" class="background">
+      <img id="corner" class="corner">
+      <div class="page-container">
+        <div id="active-list" class="games-list"></div>
+        <div class="artwork"></div>
+      </div>
+      <div id="games-list" class="hidden"></div>
+    </div>
+  </body>
+</html>

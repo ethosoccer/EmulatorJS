@@ -3,3 +3,5 @@
 !index.js
 !public/
 !public/**
+!frontend/
+!frontend/**

@@ -6,12 +6,12 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="apple-touch-icon" href="icon.png" crossorigin="use-credentials">
     <link rel="manifest" href="manifest.json" crossorigin="use-credentials">
-    <link rel="stylesheet" href="css/index.css?v=20260419-console-back">
+    <link rel="stylesheet" href="css/index.css?v=20260419-save-browser">
     <script src="js/vendor/jquery.min.js"></script>
     <script src="js/vendor/hammer.min.js"></script>
     <script src="js/vendor/browserfs.min.js"></script>
     <script src="js/vendor/jszip.min.js"></script>
-    <script src="js/index.js?v=20260419-console-back"></script>
+    <script src="js/index.js?v=20260419-save-browser"></script>
   </head>
   <body>
     <div id="menu">
@@ -65,6 +65,14 @@
         <div id="favorites-status" class="search-status">Loading favorites...</div>
         <div id="favorites-results" class="search-results"></div>
       </div>
+      <div id="save-panel" class="save-panel hidden">
+        <div class="search-header">
+          <h2 id="save-panel-title">Game Saves</h2>
+          <button type="button" onclick="closeSavePanel()">Close</button>
+        </div>
+        <div id="save-panel-status" class="search-status">Loading saves...</div>
+        <div id="save-panel-results" class="search-results"></div>
+      </div>
       <div id="login-panel" class="login-panel hidden">
         <div class="search-header">
           <h2>Profile</h2>
@@ -78,11 +86,25 @@
           </div>
         </div>
         <div id="profile-logged-in" class="hidden">
-          <p id="profile-name"></p>
-          <div class="search-actions">
-            <button type="button" onclick="pullServerProfile()">Pull from Server</button>
-            <button type="button" onclick="pushServerProfile()">Push to Server</button>
-            <button type="button" onclick="profileLogout()">Logout</button>
+          <div class="profile-tabs">
+            <button id="profile-tab-profile" class="is-active" type="button" onclick="showProfileTab('profile')">Profile</button>
+            <button id="profile-tab-saves" type="button" onclick="showProfileTab('saves')">Game Saves</button>
+          </div>
+          <div id="profile-tab-panel-profile">
+            <p id="profile-name"></p>
+            <div class="search-actions">
+              <button type="button" onclick="pullServerProfile()">Pull from Server</button>
+              <button type="button" onclick="pushServerProfile()">Push to Server</button>
+              <button type="button" onclick="profileLogout()">Logout</button>
+            </div>
+          </div>
+          <div id="profile-tab-panel-saves" class="hidden">
+            <div class="search-actions">
+              <button type="button" onclick="renderProfileSaves()">Refresh Saves</button>
+              <button type="button" onclick="downloadAllSaves()">Download All Saves</button>
+            </div>
+            <div id="profile-saves-status" class="search-status">Open this tab to scan local saves.</div>
+            <div id="profile-saves-results" class="search-results"></div>
           </div>
         </div>
         <div id="profile-status" class="search-status"></div>

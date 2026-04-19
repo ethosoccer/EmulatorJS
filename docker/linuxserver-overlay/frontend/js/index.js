@@ -27,6 +27,8 @@ var profileFsReady;
 var profilePushTimer;
 var profilePushTimeout;
 var profilePushInFlight = false;
+var saveInventoryCache;
+var saveInventoryLoading;
 var requireMainLogin = false;
 var isSafari = navigator.vendor && navigator.vendor.indexOf('Apple') > -1 &&
                navigator.userAgent &&
@@ -130,6 +132,284 @@ function freshJsonUrl(url) {
 function fetchFreshJson(url) {
   return fetch(freshJsonUrl(url), Init);
 }
+function idbRead(dbName, storeName, reader) {
+  return new Promise(function(resolve) {
+    if (!window.indexedDB) {
+      resolve();
+      return;
+    }
+    var request = indexedDB.open(dbName);
+    request.onerror = function() {
+      resolve();
+    };
+    request.onsuccess = function() {
+      var db = request.result;
+      if (!db.objectStoreNames.contains(storeName)) {
+        db.close();
+        resolve();
+        return;
+      }
+      try {
+        var tx = db.transaction(storeName, 'readonly');
+        var store = tx.objectStore(storeName);
+        var readRequest = reader(store);
+        readRequest.onsuccess = function() {
+          resolve(readRequest.result);
+        };
+        readRequest.onerror = function() {
+          resolve();
+        };
+        tx.oncomplete = function() {
+          db.close();
+        };
+      } catch(e) {
+        db.close();
+        resolve();
+      }
+    };
+  });
+}
+async function idbGetKeys(dbName, storeName) {
+  return await idbRead(dbName, storeName, function(store) {
+    return store.getAllKeys ? store.getAllKeys() : store.openKeyCursor();
+  }) || [];
+}
+async function idbGetValue(dbName, storeName, key) {
+  return await idbRead(dbName, storeName, function(store) {
+    return store.get(key);
+  });
+}
+function saveBasename(value) {
+  var name = String(value || '').split('/').pop().split('#')[0].split('?')[0];
+  return name.replace(/\.(zip|7z|nes|sfc|smc|gb|gbc|gba|n64|z64|v64|bin|cue|iso|chd|state|srm|sav|eep|fla|sra|dsv|rtc|ram|nvm|mcr|mcd|disk[0-9]+)$/i, '');
+}
+function saveMatchKey(value) {
+  return saveBasename(value).toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+function saveRecordMatchesGame(record, gameBase) {
+  var gameKey = saveMatchKey(gameBase);
+  var saveKey = saveMatchKey(record.name || record.key || '');
+  return gameKey && saveKey && (saveKey.indexOf(gameKey) !== -1 || gameKey.indexOf(saveKey) !== -1);
+}
+function formatBytes(size) {
+  if (!size && size !== 0) {
+    return 'unknown size';
+  }
+  if (size < 1024) {
+    return size + ' B';
+  }
+  if (size < 1024 * 1024) {
+    return Math.round(size / 102.4) / 10 + ' KB';
+  }
+  return Math.round(size / 1024 / 102.4) / 10 + ' MB';
+}
+function bytesFromSaveValue(value) {
+  if (!value) {
+    return null;
+  }
+  if (value.contents) {
+    return value.contents;
+  }
+  if (value.data) {
+    return value.data;
+  }
+  return value;
+}
+function saveByteLength(value) {
+  var bytes = bytesFromSaveValue(value);
+  if (!bytes) {
+    return 0;
+  }
+  return bytes.byteLength || bytes.length || 0;
+}
+async function buildSaveInventory() {
+  var saves = [];
+  var stateKeys = await idbGetKeys('EmulatorJS-states', 'states');
+  for (var stateKey of stateKeys) {
+    if (!stateKey || stateKey === '?EJS_KEYS!') {
+      continue;
+    }
+    var stateValue = await idbGetValue('EmulatorJS-states', 'states', stateKey);
+    saves.push({
+      id: 'state::' + stateKey,
+      key: stateKey,
+      name: stateKey,
+      type: 'Save State',
+      source: 'EmulatorJS-states',
+      size: saveByteLength(stateValue),
+      load: async function(key) {
+        return bytesFromSaveValue(await idbGetValue('EmulatorJS-states', 'states', key));
+      }.bind(null, stateKey)
+    });
+  }
+  var fileKeys = await idbGetKeys('FILE_DATA', 'FILE_DATA');
+  for (var fileKey of fileKeys) {
+    if (!fileKey || String(fileKey).indexOf('/data/saves/') === -1) {
+      continue;
+    }
+    var fileValue = await idbGetValue('FILE_DATA', 'FILE_DATA', fileKey);
+    var fileName = String(fileKey).split('/').pop();
+    saves.push({
+      id: 'file::' + fileKey,
+      key: fileKey,
+      name: fileName,
+      type: fileName.indexOf('quick.state') !== -1 ? 'Quick Save' : 'In-game Save',
+      source: 'RetroArch saves',
+      size: saveByteLength(fileValue),
+      load: async function(key) {
+        return bytesFromSaveValue(await idbGetValue('FILE_DATA', 'FILE_DATA', key));
+      }.bind(null, fileKey)
+    });
+  }
+  saves.sort(function(a, b) {
+    return (a.name || '').localeCompare(b.name || '');
+  });
+  saveInventoryCache = saves;
+  return saves;
+}
+async function getSaveInventory(refresh) {
+  if (!refresh && saveInventoryCache) {
+    return saveInventoryCache;
+  }
+  if (saveInventoryLoading) {
+    return saveInventoryLoading;
+  }
+  saveInventoryLoading = buildSaveInventory();
+  var saves = await saveInventoryLoading;
+  saveInventoryLoading = null;
+  return saves;
+}
+function findSaveById(saveId) {
+  return (saveInventoryCache || []).find(function(save) {
+    return save.id === saveId;
+  });
+}
+async function downloadSaveFile(saveId) {
+  var save = findSaveById(saveId);
+  if (!save) {
+    await getSaveInventory(true);
+    save = findSaveById(saveId);
+  }
+  if (!save) {
+    alert('Save not found.');
+    return;
+  }
+  var bytes = await save.load();
+  if (!bytes) {
+    alert('Unable to read save file.');
+    return;
+  }
+  var blob = new Blob([bytes], {type: 'application/octet-stream'});
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = save.name || 'game-save.bin';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+async function downloadSaveList(saveIds, fileName) {
+  var zip = new JSZip();
+  for (var saveId of saveIds) {
+    var save = findSaveById(saveId);
+    if (!save) {
+      continue;
+    }
+    var bytes = await save.load();
+    if (bytes) {
+      zip.file((save.type || 'Save') + '/' + (save.name || save.key), bytes);
+    }
+  }
+  var blob = await zip.generateAsync({type:'blob'});
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = fileName || 'emulatorjs-saves.zip';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+async function downloadAllSaves() {
+  var saves = await getSaveInventory(true);
+  if (saves.length === 0) {
+    alert('No saves found.');
+    return;
+  }
+  await downloadSaveList(saves.map(function(save) { return save.id; }), 'emulatorjs-saves.zip');
+}
+function renderSaveRows(target, saves, emptyMessage) {
+  $(target).empty();
+  if (saves.length === 0) {
+    $(target).append($('<div>').addClass('search-status').text(emptyMessage || 'No saves found.'));
+    return;
+  }
+  for (var save of saves) {
+    var row = $('<div>').addClass('save-file-row');
+    var detail = $('<button>').addClass('search-result').attr('type', 'button');
+    detail.append($('<span>').addClass('save-file-title').text(save.name));
+    detail.append($('<span>').addClass('save-file-meta').text(save.type + ' - ' + formatBytes(save.size)));
+    detail.on('click', function(saveId) {
+      return function() {
+        downloadSaveFile(saveId);
+      };
+    }(save.id));
+    var download = $('<button>').attr('type', 'button').text('Download');
+    download.on('click', function(saveId) {
+      return function() {
+        downloadSaveFile(saveId);
+      };
+    }(save.id));
+    row.append(detail, download);
+    $(target).append(row);
+  }
+}
+function closeSavePanel() {
+  $('#save-panel').addClass('hidden');
+}
+async function openGameSaves(event, gameName, gameBase) {
+  if (event) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+  closeSearchPanel();
+  closeFavoritesPanel();
+  closeLoginPanel();
+  $('#save-panel-title').text('Saves for ' + gameName);
+  $('#save-panel-status').text('Loading saves...');
+  $('#save-panel-results').empty();
+  $('#save-panel').removeClass('hidden');
+  var saves = (await getSaveInventory(true)).filter(function(save) {
+    return saveRecordMatchesGame(save, gameBase);
+  });
+  $('#save-panel-status').text(saves.length + ' save' + (saves.length === 1 ? '' : 's') + ' found');
+  renderSaveRows('#save-panel-results', saves, 'No local saves found for this game yet.');
+  if (saves.length > 1) {
+    var allButton = $('<button>').attr('type', 'button').text('Download All for This Game');
+    allButton.on('click', function() {
+      downloadSaveList(saves.map(function(save) { return save.id; }), saveBasename(gameName) + '-saves.zip');
+    });
+    $('#save-panel-results').prepend(allButton);
+  }
+}
+async function renderProfileSaves() {
+  $('#profile-saves-status').text('Scanning local saves...');
+  $('#profile-saves-results').empty();
+  var saves = await getSaveInventory(true);
+  $('#profile-saves-status').text(saves.length + ' save' + (saves.length === 1 ? '' : 's') + ' found');
+  renderSaveRows('#profile-saves-results', saves, 'No local saves found yet.');
+}
+function showProfileTab(tab) {
+  var showSaves = tab === 'saves';
+  $('#profile-tab-profile').toggleClass('is-active', !showSaves);
+  $('#profile-tab-saves').toggleClass('is-active', showSaves);
+  $('#profile-tab-panel-profile').toggleClass('hidden', showSaves);
+  $('#profile-tab-panel-saves').toggleClass('hidden', !showSaves);
+  if (showSaves) {
+    renderProfileSaves();
+  }
+}
 function setProfileStatus(message) {
   $('#profile-status').text(message || '');
 }
@@ -164,6 +444,7 @@ function updateLoginState() {
 function openLoginPanel() {
   closeSearchPanel();
   closeFavoritesPanel();
+  closeSavePanel();
   $('#login-panel').removeClass('hidden');
   updateLoginState();
 }
@@ -427,6 +708,25 @@ function setFavoriteButtonState(favoriteId) {
     $(this).attr('title', active ? 'Remove from favorites' : 'Add to favorites');
   });
 }
+function setSaveButtonState(saveBase, hasSaves) {
+  $('.save-toggle').filter(function() {
+    return this.dataset.saveBase === saveBase;
+  }).each(function() {
+    $(this).toggleClass('hidden', !hasSaves);
+    $(this).toggleClass('has-saves', hasSaves);
+    $(this).attr('title', hasSaves ? 'Download saves' : 'No local saves found');
+  });
+}
+async function refreshSaveIndicators() {
+  var saves = await getSaveInventory(false);
+  $('.save-toggle').each(function() {
+    var saveBase = this.dataset.saveBase;
+    var hasSaves = saves.some(function(save) {
+      return saveRecordMatchesGame(save, saveBase);
+    });
+    setSaveButtonState(saveBase, hasSaves);
+  });
+}
 function toggleFavorite(event, favoriteId, button) {
   if (event) {
     event.preventDefault();
@@ -457,6 +757,7 @@ function toggleFavorite(event, favoriteId, button) {
 }
 function openSearchPanel() {
   closeFavoritesPanel();
+  closeSavePanel();
   $('#search-panel').removeClass('hidden');
   ensureSearchCatalog().then(function() {
     runGameSearch();
@@ -483,6 +784,7 @@ function clearGameSearch() {
 }
 function showFavorites() {
   closeSearchPanel();
+  closeSavePanel();
   $('#favorites-panel').removeClass('hidden');
   $('#favorites-status').text('Loading favorites...');
   $('#favorites-results').empty();
@@ -695,6 +997,7 @@ function goBackToMain() {
   closeSearchPanel();
   closeFavoritesPanel();
   closeLoginPanel();
+  closeSavePanel();
   $('#console-list-search').val('');
   if (window.location.hash === '#main') {
     loadjson('main');
@@ -1064,8 +1367,11 @@ async function rendermenu(datas) {
       var itemTitle = data.title || itemPath || 'Games';
       var favoriteName = cleanGameName(romName, itemPath + '::' + name);
       var favoriteId = itemPath + '::' + favoriteName;
+      var saveBase = saveBasename(romName + (item.hasOwnProperty('rom_extension') ? item.rom_extension : data.defaults.rom_extension || ''));
       var favoriteButton = '';
+      var saveButton = '';
       if (itemType == 'game') {
+        saveButton = '<button class="save-toggle hidden" type="button" data-save-base="' + escapeHtml(saveBase) + '" data-save-name="' + escapeHtml(favoriteName) + '" onclick="openGameSaves(event, this.getAttribute(\'data-save-name\'), this.getAttribute(\'data-save-base\'))" aria-label="Download saves" title="No local saves found">&#128190;</button>';
         favoriteButton = '<button class="favorite-toggle" type="button" data-favorite-id="' + escapeHtml(favoriteId) + '" data-favorite-name="' + escapeHtml(favoriteName) + '" data-favorite-root="' + escapeHtml(root) + '" data-favorite-title="' + escapeHtml(itemTitle) + '" data-favorite-index="' + originalIndexByName[name] + '" onclick="toggleFavorite(event, this.getAttribute(\'data-favorite-id\'), this)" aria-label="Toggle favorite" title="Add to favorites">&hearts;</button>';
       }
       $('#games-list').append('\
@@ -1073,7 +1379,7 @@ async function rendermenu(datas) {
           <div id="h' + count + '" class="menu-wrap ' + shrink + '">\
             <a onclick="launch(this)" id="i' + count + '" ' + jsdata + '>\
               ' + logo_html + '\
-            </a>' + favoriteButton + '\
+            </a>' + saveButton + favoriteButton + '\
           </div>\
         </div>');
       count++;
@@ -1097,6 +1403,7 @@ async function rendermenu(datas) {
     for (var favoriteId of getFavoriteIds()) {
       setFavoriteButtonState(favoriteId);
     }
+    refreshSaveIndicators();
     $('.menu-div').css({'height': image_height});
     $('.menu-img').css({'max-height': image_height});
     highlight(active_item);

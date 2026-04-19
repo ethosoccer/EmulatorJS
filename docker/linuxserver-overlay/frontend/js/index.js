@@ -1,5 +1,6 @@
 //// Default vars ////
-var Init = { method:'GET',headers:{'Access-Control-Allow-Origin':'*'},mode:'cors'};
+var Init = { method:'GET',headers:{'Access-Control-Allow-Origin':'*'},mode:'cors',cache:'no-store'};
+var configCacheToken = Date.now().toString();
 var defaultKeys = [
   'emulator',
   'bios',
@@ -121,6 +122,13 @@ function profileRequest(body) {
     headers: {Accept: 'application/json', 'Content-Type': 'application/json'},
     body: JSON.stringify(body)
   });
+}
+function freshJsonUrl(url) {
+  var separator = url.indexOf('?') === -1 ? '?' : '&';
+  return url + separator + 'v=' + configCacheToken;
+}
+function fetchFreshJson(url) {
+  return fetch(freshJsonUrl(url), Init);
 }
 function setProfileStatus(message) {
   $('#profile-status').text(message || '');
@@ -534,7 +542,7 @@ async function fetchConfig(name) {
   if (searchSourceConfigs[name]) {
     return searchSourceConfigs[name];
   }
-  var response = await fetch('user/config/' + name + '.json', Init);
+  var response = await fetchFreshJson('user/config/' + name + '.json');
   var data = await response.json();
   searchSourceConfigs[name] = data;
   return data;
@@ -1412,7 +1420,7 @@ async function loadjson(name, active_item) {
   } else {
     var url = 'user/config/' + name + '.json';
   }
-  let response = await fetch(url,Init);
+  let response = await fetchFreshJson(url);
   let data = await response.json();
   rendermenu([data, active_item]);
 }

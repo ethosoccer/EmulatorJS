@@ -34,6 +34,13 @@ server {
     try_files $uri =404;
   }
 
+  location ~* ^/user/(config|hashes)/.*\.json$ {
+    add_header Cache-Control "no-store, max-age=0, must-revalidate" always;
+    add_header Pragma "no-cache" always;
+    add_header Expires "0" always;
+    try_files $uri =404;
+  }
+
   location / {
     try_files $uri $uri/ =404;
   }

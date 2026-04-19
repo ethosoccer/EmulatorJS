@@ -5,3 +5,5 @@
 !public/**
 !frontend/
 !frontend/**
+!nginx/
+!nginx/**

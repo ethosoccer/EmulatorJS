@@ -42,6 +42,12 @@ The game browser now has top-left Search and Favorites controls. Search builds a
 
 Advanced filters include console, logo artwork status, preview video status, and favorites-only. Favorites are stored in browser `localStorage` using the console path and game name, and games can be toggled from the visible game list with the heart button.
 
+### Frontend Cache Policy
+
+The overlay replaces `/etc/nginx/site-confs/default` to make the frontend shell less sticky in normal browser sessions. The root document, `index.html`, `css/index.css`, and `js/index.js` are served with no-cache headers, while larger ROM, artwork, video, and emulator assets keep the default static-file behavior.
+
+The frontend and admin HTML also use versioned CSS/JS URLs so new overlay builds force browsers to request the updated entrypoint files.
+
 ## Build
 
 From the repository root:

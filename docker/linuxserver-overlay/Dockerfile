@@ -7,3 +7,4 @@ COPY public/js/index.js /emulatorjs/public/js/index.js
 COPY frontend/index.html /emulatorjs/frontend/index.html
 COPY frontend/css/index.css /emulatorjs/frontend/css/index.css
 COPY frontend/js/index.js /emulatorjs/frontend/js/index.js
+COPY nginx/site-confs/default /etc/nginx/site-confs/default

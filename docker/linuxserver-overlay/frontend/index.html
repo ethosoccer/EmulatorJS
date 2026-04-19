@@ -6,12 +6,12 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="apple-touch-icon" href="icon.png" crossorigin="use-credentials">
     <link rel="manifest" href="manifest.json" crossorigin="use-credentials">
-    <link rel="stylesheet" href="css/index.css?v=20260419-profile-saves">
+    <link rel="stylesheet" href="css/index.css?v=20260419-profile-modal">
     <script src="js/vendor/jquery.min.js"></script>
     <script src="js/vendor/hammer.min.js"></script>
     <script src="js/vendor/browserfs.min.js"></script>
     <script src="js/vendor/jszip.min.js"></script>
-    <script src="js/index.js?v=20260419-profile-saves"></script>
+    <script src="js/index.js?v=20260419-profile-modal"></script>
   </head>
   <body>
     <div id="menu">
@@ -75,10 +75,11 @@
       </div>
       <div id="login-panel" class="login-panel hidden">
         <div class="search-header">
-          <h2>Profile</h2>
+          <h2 id="profile-panel-title">Profile</h2>
           <button type="button" onclick="closeLoginPanel()">Close</button>
         </div>
         <div id="profile-logged-out">
+          <p class="profile-login-copy">Log in with your game profile.</p>
           <input id="profile-user" type="text" placeholder="user" autocomplete="username">
           <input id="profile-pass" type="password" placeholder="pass" autocomplete="current-password">
           <div class="search-actions">

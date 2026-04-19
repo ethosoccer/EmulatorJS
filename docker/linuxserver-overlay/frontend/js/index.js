@@ -566,6 +566,7 @@ function updateLoginState() {
   var role = localStorage.getItem('role') || 'user';
   if (user && localStorage.getItem('pass')) {
     $('#login-button').text(user);
+    $('#profile-panel-title').text('Profile');
     $('#profile-name').text('Logged in as ' + user + ' (' + role + ')');
     $('#profile-logged-out').addClass('hidden');
     $('#profile-logged-in').removeClass('hidden');
@@ -578,6 +579,7 @@ function updateLoginState() {
     scheduleProfileAutoPush();
   } else {
     $('#login-button').text('Login');
+    $('#profile-panel-title').text(requireMainLogin ? 'Login' : 'Profile');
     $('#profile-name').empty();
     $('#profile-logged-in').addClass('hidden');
     $('#profile-logged-out').removeClass('hidden');
@@ -597,6 +599,9 @@ function openLoginPanel() {
   updateLoginState();
 }
 function closeLoginPanel() {
+  if (requireMainLogin && !localStorage.getItem('user')) {
+    return;
+  }
   $('#login-panel').addClass('hidden');
 }
 async function profileLogin() {

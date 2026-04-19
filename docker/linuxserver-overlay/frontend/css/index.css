@@ -36,6 +36,22 @@ canvas {
   visibility: hidden;
 }
 
+#file-browser-link.hidden {
+  display: none;
+}
+
+body.profile-required .page-container,
+body.profile-required #bgvid,
+body.profile-required #background,
+body.profile-required #corner {
+  filter: blur(6px);
+  pointer-events: none;
+}
+
+body.profile-required .login-panel {
+  display: block;
+}
+
 .search-panel.hidden,
 .favorites-panel.hidden,
 .login-panel.hidden,

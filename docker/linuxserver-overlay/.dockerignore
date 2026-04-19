@@ -1,6 +1,7 @@
 *
 !Dockerfile
 !index.js
+!profile.js
 !public/
 !public/**
 !frontend/

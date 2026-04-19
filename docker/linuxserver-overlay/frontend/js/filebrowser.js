@@ -55,7 +55,7 @@ async function renderFiles(directory) {
   }
   let table = $('<table>').addClass('fileTable');
   let tableHeader = $('<tr>');
-  for await (name of ['Name', 'Type', 'Delete (NO WARNING)']) {
+  for await (name of ['Name', 'Type', 'Delete']) {
     tableHeader.append($('<th>').text(name));
   }
   let parentRow = $('<tr>');
@@ -269,6 +269,9 @@ function allowDrop(ev) {
 async function deleter(item) {
   let directory = $('#filebrowser').data('directory');
   item = item.replace("|","'"); 
+  if (!confirm('Delete "' + item + '"? This cannot be undone.')) {
+    return;
+  }
   if (fs.lstatSync(item).isDirectory()) {
     await rmDir(item);
   } else {
@@ -383,7 +386,25 @@ async function loadProfile() {
     $('#profile').removeClass('hidden');
   }
   if ((localStorage.getItem('user')) && (localStorage.getItem('pass'))) {
-    loggedIn();
+    await verifyLogin();
+  }
+}
+
+async function verifyLogin() {
+  try {
+    let loginSettings = postSettings;
+    loginSettings.body = JSON.stringify({user:localStorage.getItem('user'),pass:localStorage.getItem('pass'),type:'login'});
+    let res = await fetch(endPoint,loginSettings);
+    let json = await res.json();
+    if (json.status == 'success') {
+      localStorage.setItem('role', json.role || 'user');
+      loggedIn();
+    } else {
+      loggedOut();
+    }
+  } catch(e) {
+    console.log(e);
+    loggedOut();
   }
 }
 
@@ -401,6 +422,7 @@ async function login() {
     if (json.status == 'success') {
       localStorage.setItem('user',json.user);
       localStorage.setItem('pass',pass);
+      localStorage.setItem('role',json.role || 'user');
       loggedIn();
     } else {
       alert('Bad login'); 
@@ -414,17 +436,32 @@ async function login() {
 function logout() {
   localStorage.removeItem('user');
   localStorage.removeItem('pass');
+  localStorage.removeItem('role');
   loggedOut();
 }
 
 // Render as logged in
 function loggedIn() {
   let user = localStorage.getItem('user');
+  let role = localStorage.getItem('role') || 'user';
   $('#loginEntry').addClass('hidden');
   $('#defaultPull').addClass('hidden');
   $('#logout').removeClass('hidden');
-  $('#syncButtons').removeClass('hidden');
-  $('#username').text(user);
+  $('#username').text(user + ' (' + role + ')');
+  if (role == 'admin') {
+    $('#syncButtons').removeClass('hidden');
+    $('#adminGate').addClass('hidden');
+    $('#adminContent').removeClass('hidden');
+    setupFileSystem();
+    loadTouchInput();
+    loadUsers();
+    loadAdminSettings();
+  } else {
+    $('#syncButtons').addClass('hidden');
+    $('#adminContent').addClass('hidden');
+    $('#adminGate').removeClass('hidden');
+    $('#adminGate').find('p').text('Your profile is logged in, but only admin profiles can use the file browser.');
+  }
 }
 
 // Render as logged out
@@ -434,6 +471,99 @@ function loggedOut() {
   $('#logout').addClass('hidden');
   $('#defaultPull').removeClass('hidden');
   $('#loginEntry').removeClass('hidden');
+  $('#adminContent').addClass('hidden');
+  $('#adminGate').removeClass('hidden');
+  $('#adminGate').find('p').text('Log in with an admin profile to use the file browser and user management.');
+}
+
+function adminProfileBody(type, extra) {
+  let body = Object.assign({
+    user: localStorage.getItem('user'),
+    pass: localStorage.getItem('pass'),
+    type: type
+  }, extra || {});
+  return body;
+}
+
+async function loadUsers() {
+  if (localStorage.getItem('role') !== 'admin') {
+    return;
+  }
+  let loginSettings = postSettings;
+  loginSettings.body = JSON.stringify(adminProfileBody('listusers'));
+  let res = await fetch(endPoint, loginSettings);
+  let json = await res.json();
+  $('#usersList').empty();
+  if (json.status !== 'success') {
+    $('#usersList').text('Unable to load users.');
+    return;
+  }
+  let table = $('<table>').addClass('fileTable');
+  let header = $('<tr>');
+  for await (let name of ['Username', 'Role', 'Action']) {
+    header.append($('<th>').text(name));
+  }
+  table.append(header);
+  for await (let user of json.users) {
+    let row = $('<tr>');
+    let roleSelect = $('<select>').attr('data-user', user.username).append($('<option>').attr('value','user').text('User'), $('<option>').attr('value','admin').text('Admin')).val(user.role);
+    let save = $('<button>').text('Save Role').on('click', async function() {
+      await setUserRole(user.username, roleSelect.val());
+    });
+    row.append($('<td>').text(user.username), $('<td>').append(roleSelect), $('<td>').append(save));
+    table.append(row);
+  }
+  $('#usersList').append(table);
+}
+
+async function setUserRole(target, role) {
+  let loginSettings = postSettings;
+  loginSettings.body = JSON.stringify(adminProfileBody('setrole', {target: target, role: role}));
+  let res = await fetch(endPoint, loginSettings);
+  let json = await res.json();
+  if (json.status !== 'success') {
+    alert('Unable to update role');
+  }
+  loadUsers();
+}
+
+async function createManagedUser() {
+  let newUser = $('#newUser').val();
+  let newPass = $('#newPass').val();
+  let role = $('#newRole').val();
+  let loginSettings = postSettings;
+  loginSettings.body = JSON.stringify(adminProfileBody('createsimpleuser', {newUser: newUser, newPass: newPass, role: role}));
+  let res = await fetch(endPoint, loginSettings);
+  let json = await res.json();
+  if (json.status == 'success') {
+    $('#newUser').val('');
+    $('#newPass').val('');
+    loadUsers();
+  } else {
+    alert('Unable to create user');
+  }
+}
+
+function showUserManagement() {
+  $('#userManagement').toggleClass('hidden');
+}
+
+async function loadAdminSettings() {
+  let loginSettings = postSettings;
+  loginSettings.body = JSON.stringify(adminProfileBody('getsettings'));
+  let res = await fetch(endPoint, loginSettings);
+  let json = await res.json();
+  if (json.status == 'success') {
+    $('#requireMainLogin').prop('checked', json.requireLogin === true);
+  }
+}
+
+async function saveAdminSettings() {
+  let loginSettings = postSettings;
+  loginSettings.body = JSON.stringify(adminProfileBody('setsettings', {requireLogin: $('#requireMainLogin').prop('checked')}));
+  let res = await fetch(endPoint, loginSettings);
+  let json = await res.json();
+  alert(json.status == 'success' ? 'Settings saved' : 'Unable to save settings');
 }
 
 // Pull profile from server
@@ -600,6 +730,10 @@ function touchSave() {
 
 // Create Async filestore
 async function setupFileSystem() {
+  if (afs) {
+    renderFiles($('#filebrowser').data('directory') || '/');
+    return;
+  }
   var imfs = new BrowserFS.FileSystem.InMemory();
   afs = new BrowserFS.FileSystem.AsyncMirror(imfs,
     new BrowserFS.FileSystem.IndexedDB(async function(e, fs) {
@@ -621,7 +755,5 @@ async function setupMounts() {
 // On page load
 window.onload = function() {
   updateThemeToggle();
-  setupFileSystem();
   loadProfile();
-  loadTouchInput();
 }

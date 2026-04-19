@@ -60,6 +60,10 @@ The overlay replaces the LinuxServer helper app's file browser assets:
 
 The file browser now shares the modern admin styling and dark-mode toggle. Its existing profile Pull/Push buttons also include favorites in the profile zip.
 
+The file browser is treated as an admin surface. Profile logins now include a `role` of `admin` or `user`; existing `eugene` profiles are treated as `admin` if no role is stored yet, while other missing roles default to `user`. Non-admin users do not see the file-browser icon on the main screen, and `/filebrowser.html` shows an admin login gate instead of the file browser.
+
+File deletion now requires a confirmation dialog. The file browser also includes User Management for admins, including role changes, simple user creation, and an option to require login before showing the main game browser.
+
 ### Frontend Cache Policy
 
 The overlay replaces `/etc/nginx/site-confs/default` to make the frontend shell less sticky in normal browser sessions. The root document, `index.html`, `filebrowser.html`, the active frontend CSS, and the active frontend JS files are served with no-cache headers, while larger ROM, artwork, video, and emulator assets keep the default static-file behavior.

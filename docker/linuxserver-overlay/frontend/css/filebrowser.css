@@ -93,6 +93,39 @@ body {
   padding: 20px;
 }
 
+.gate-panel,
+.admin-panel {
+  margin: 20px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: 0 8px 24px rgba(24, 35, 48, 0.08);
+}
+
+.gate-panel h1,
+.admin-panel h1 {
+  margin-top: 0;
+}
+
+.gate-panel p {
+  color: var(--muted);
+}
+
+.setting-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 0;
+  color: var(--text);
+  font-weight: 700;
+}
+
+.setting-row input {
+  width: auto;
+  min-height: auto;
+}
+
 .file-header {
   display: flex;
   align-items: flex-end;
@@ -252,6 +285,12 @@ tr:hover {
 
   #syncButtons {
     margin-left: 0;
+  }
+
+  .gate-panel,
+  .admin-panel {
+    margin: 12px;
+    padding: 12px;
   }
 
   input,

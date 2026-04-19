@@ -26,6 +26,7 @@ var profileFsReady;
 var profilePushTimer;
 var profilePushTimeout;
 var profilePushInFlight = false;
+var requireMainLogin = false;
 var isSafari = navigator.vendor && navigator.vendor.indexOf('Apple') > -1 &&
                navigator.userAgent &&
                navigator.userAgent.indexOf('CriOS') == -1 &&
@@ -126,17 +127,30 @@ function setProfileStatus(message) {
 }
 function updateLoginState() {
   var user = localStorage.getItem('user');
+  var role = localStorage.getItem('role') || 'user';
   if (user && localStorage.getItem('pass')) {
     $('#login-button').text(user);
-    $('#profile-name').text('Logged in as ' + user);
+    $('#profile-name').text('Logged in as ' + user + ' (' + role + ')');
     $('#profile-logged-out').addClass('hidden');
     $('#profile-logged-in').removeClass('hidden');
+    $('body').removeClass('profile-required');
+    if (role == 'admin') {
+      $('#file-browser-link').removeClass('hidden');
+    } else {
+      $('#file-browser-link').addClass('hidden');
+    }
     scheduleProfileAutoPush();
   } else {
     $('#login-button').text('Login');
     $('#profile-name').empty();
     $('#profile-logged-in').addClass('hidden');
     $('#profile-logged-out').removeClass('hidden');
+    $('#file-browser-link').addClass('hidden');
+    if (requireMainLogin) {
+      $('body').addClass('profile-required');
+      $('#login-panel').removeClass('hidden');
+      setProfileStatus('Login required.');
+    }
   }
 }
 function openLoginPanel() {
@@ -159,6 +173,7 @@ async function profileLogin() {
     if (json.status == 'success') {
       localStorage.setItem('user', json.user);
       localStorage.setItem('pass', pass);
+      localStorage.setItem('role', json.role || 'user');
       $('#profile-user').val('');
       updateLoginState();
       await pullServerProfile(true);
@@ -170,11 +185,44 @@ async function profileLogin() {
     setProfileStatus('Login failed.');
   }
 }
+async function verifyStoredProfileLogin() {
+  if (!localStorage.getItem('user') || !localStorage.getItem('pass')) {
+    updateLoginState();
+    return;
+  }
+  try {
+    var res = await profileRequest({user:localStorage.getItem('user'), pass:localStorage.getItem('pass'), type:'login'});
+    var json = await res.json();
+    if (json.status == 'success') {
+      localStorage.setItem('user', json.user);
+      localStorage.setItem('role', json.role || 'user');
+    } else {
+      localStorage.removeItem('user');
+      localStorage.removeItem('pass');
+      localStorage.removeItem('role');
+    }
+  } catch(e) {
+    console.log(e);
+  }
+  updateLoginState();
+}
 function profileLogout() {
   localStorage.removeItem('user');
   localStorage.removeItem('pass');
+  localStorage.removeItem('role');
   updateLoginState();
   setProfileStatus('Logged out.');
+}
+
+async function loadPublicSettings() {
+  try {
+    var res = await profileRequest({type:'publicsettings'});
+    var json = await res.json();
+    requireMainLogin = json.status == 'success' && json.requireLogin === true;
+  } catch(e) {
+    console.log(e);
+  }
+  await verifyStoredProfileLogin();
 }
 function setupProfileFs() {
   if (profileFsReady) {
@@ -1289,6 +1337,7 @@ async function loadjson(name, active_item) {
 
 window.onload = function() {
   updateLoginState();
+  loadPublicSettings();
   setupProfileFs().catch(function(e) {
     console.log(e);
   });

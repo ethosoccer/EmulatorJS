@@ -6,17 +6,17 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="apple-touch-icon" href="icon.png" crossorigin="use-credentials">
     <link rel="manifest" href="manifest.json" crossorigin="use-credentials">
-    <link rel="stylesheet" href="css/index.css?v=20260419-mobile-toolbar">
+    <link rel="stylesheet" href="css/index.css?v=20260419-admin-gate">
     <script src="js/vendor/jquery.min.js"></script>
     <script src="js/vendor/hammer.min.js"></script>
     <script src="js/vendor/browserfs.min.js"></script>
     <script src="js/vendor/jszip.min.js"></script>
-    <script src="js/index.js?v=20260419-mobile-toolbar"></script>
+    <script src="js/index.js?v=20260419-admin-gate"></script>
   </head>
   <body>
     <div id="menu">
       <div class="menu-toolbar">
-        <a class="icon-tool" target="_blank" href="filebrowser.html">
+        <a id="file-browser-link" class="icon-tool hidden" target="_blank" href="filebrowser.html">
           <img class="file-button" src="css/folder.svg"/>
         </a>
         <button class="icon-tool" type="button" onclick="fullscreen()" aria-label="Fullscreen">

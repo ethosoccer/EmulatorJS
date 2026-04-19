@@ -223,7 +223,15 @@ async function idbGetValue(dbName, storeName, key) {
 }
 function saveBasename(value) {
   var name = String(value || '').split('/').pop().split('#')[0].split('?')[0];
-  return name.replace(/\.(zip|7z|nes|sfc|smc|gb|gbc|gba|n64|z64|v64|bin|cue|iso|chd|state|srm|sav|eep|fla|sra|dsv|rtc|ram|nvm|mcr|mcd|disk[0-9]+)$/i, '');
+  try {
+    name = decodeURIComponent(name);
+  } catch(e) {}
+  var previous;
+  do {
+    previous = name;
+    name = name.replace(/\.(auto|zip|7z|nes|sfc|smc|gb|gbc|gba|n64|z64|v64|bin|cue|iso|chd|state|srm|sav|eep|fla|sra|dsv|rtc|ram|nvm|mcr|mcd|disk[0-9]+)$/i, '');
+  } while (name !== previous);
+  return name;
 }
 function saveMatchKey(value) {
   return saveBasename(value).toLowerCase().replace(/[^a-z0-9]+/g, '');
@@ -300,8 +308,70 @@ function saveByteLength(value) {
   }
   return bytes.byteLength || bytes.length || 0;
 }
+function profileRequestBody(type, extra) {
+  var body = {
+    user: localStorage.getItem('user'),
+    pass: localStorage.getItem('pass'),
+    type: type
+  };
+  return Object.assign(body, extra || {});
+}
+function isProfileSavePath(fileName) {
+  return /^states\/.+\/.+/i.test(fileName) || /^saves\/.+\/.+/i.test(fileName);
+}
+function profileSaveType(fileName) {
+  if (/^states\//i.test(fileName)) {
+    return /\.auto$/i.test(fileName) ? 'Auto Save State' : 'Save State';
+  }
+  return 'In-game Save';
+}
+function profileSaveSource(fileName) {
+  var parts = String(fileName || '').split('/');
+  return 'Profile: ' + (parts[0] || 'saves') + (parts[1] ? '/' + parts[1] : '');
+}
+async function buildProfileSaveInventory() {
+  if (!localStorage.getItem('user') || !localStorage.getItem('pass')) {
+    return [];
+  }
+  try {
+    var response = await profileRequest(profileRequestBody('pull'));
+    var profile = await response.json();
+    if (profile.status !== 'success' || !profile.data) {
+      return [];
+    }
+    var zip = await JSZip.loadAsync(profile.data, {base64: true});
+    var saves = [];
+    for (var fileName of Object.keys(zip.files)) {
+      var file = zip.files[fileName];
+      if (file.dir || !isProfileSavePath(fileName)) {
+        continue;
+      }
+      var bytes = await file.async('uint8array');
+      var displayName = String(fileName).split('/').pop();
+      try {
+        displayName = decodeURIComponent(displayName);
+      } catch(e) {}
+      saves.push({
+        id: 'profile::' + fileName,
+        key: fileName,
+        name: displayName,
+        type: profileSaveType(fileName),
+        source: profileSaveSource(fileName),
+        size: saveByteLength(bytes),
+        load: async function(data) {
+          return data;
+        }.bind(null, bytes)
+      });
+    }
+    return saves;
+  } catch(e) {
+    console.log('Unable to scan profile saves', e);
+    return [];
+  }
+}
 async function buildSaveInventory() {
   var saves = [];
+  saves = saves.concat(await buildProfileSaveInventory());
   var stateKeys = await idbGetKeys('EmulatorJS-states', 'states');
   for (var stateKey of stateKeys) {
     if (!stateKey || stateKey === '?EJS_KEYS!') {
@@ -427,7 +497,7 @@ function renderSaveRows(target, saves, emptyMessage) {
     var row = $('<div>').addClass('save-file-row');
     var detail = $('<button>').addClass('search-result').attr('type', 'button');
     detail.append($('<span>').addClass('save-file-title').text(save.name));
-    detail.append($('<span>').addClass('save-file-meta').text(save.type + ' - ' + formatBytes(save.size)));
+    detail.append($('<span>').addClass('save-file-meta').text(save.type + ' - ' + save.source + ' - ' + formatBytes(save.size)));
     detail.on('click', function(saveId) {
       return function() {
         downloadSaveFile(saveId);

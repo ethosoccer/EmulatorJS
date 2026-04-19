@@ -20,7 +20,14 @@ server {
     try_files /index.html =404;
   }
 
-  location ~* ^/(css/index\.css|js/index\.js)$ {
+  location = /filebrowser.html {
+    add_header Cache-Control "no-store, max-age=0, must-revalidate" always;
+    add_header Pragma "no-cache" always;
+    add_header Expires "0" always;
+    try_files /filebrowser.html =404;
+  }
+
+  location ~* ^/(css/(index|filebrowser)\.css|js/(index|filebrowser)\.js)$ {
     add_header Cache-Control "no-store, max-age=0, must-revalidate" always;
     add_header Pragma "no-cache" always;
     add_header Expires "0" always;

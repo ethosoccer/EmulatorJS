@@ -18,6 +18,14 @@ var gamePadType;
 var searchCatalog;
 var searchCatalogLoading;
 var searchSourceConfigs = {};
+var profileEndpoint = 'profile';
+var profileStoreName = 'RetroArch';
+var favoritesProfileFile = '.emulatorjs-favorites.json';
+var profileFs;
+var profileFsReady;
+var profilePushTimer;
+var profilePushTimeout;
+var profilePushInFlight = false;
 var isSafari = navigator.vendor && navigator.vendor.indexOf('Apple') > -1 &&
                navigator.userAgent &&
                navigator.userAgent.indexOf('CriOS') == -1 &&
@@ -95,6 +103,239 @@ function getFavorites() {
 function saveFavorites(favorites) {
   localStorage.setItem('ejsFavorites', JSON.stringify(favorites));
 }
+function restoreFavoritesFromProfile(data) {
+  if (!hasUsableValue(data)) {
+    return;
+  }
+  try {
+    JSON.parse(data);
+    localStorage.setItem('ejsFavorites', data);
+  } catch(e) {
+    console.log(e);
+  }
+}
+function profileRequest(body) {
+  return fetch(profileEndpoint, {
+    method: 'POST',
+    headers: {Accept: 'application/json', 'Content-Type': 'application/json'},
+    body: JSON.stringify(body)
+  });
+}
+function setProfileStatus(message) {
+  $('#profile-status').text(message || '');
+}
+function updateLoginState() {
+  var user = localStorage.getItem('user');
+  if (user && localStorage.getItem('pass')) {
+    $('#login-button').text(user);
+    $('#profile-name').text('Logged in as ' + user);
+    $('#profile-logged-out').addClass('hidden');
+    $('#profile-logged-in').removeClass('hidden');
+    scheduleProfileAutoPush();
+  } else {
+    $('#login-button').text('Login');
+    $('#profile-name').empty();
+    $('#profile-logged-in').addClass('hidden');
+    $('#profile-logged-out').removeClass('hidden');
+  }
+}
+function openLoginPanel() {
+  closeSearchPanel();
+  closeFavoritesPanel();
+  $('#login-panel').removeClass('hidden');
+  updateLoginState();
+}
+function closeLoginPanel() {
+  $('#login-panel').addClass('hidden');
+}
+async function profileLogin() {
+  var user = $('#profile-user').val();
+  var pass = $('#profile-pass').val();
+  $('#profile-pass').val('');
+  setProfileStatus('Logging in...');
+  try {
+    var res = await profileRequest({user:user, pass:pass, type:'login'});
+    var json = await res.json();
+    if (json.status == 'success') {
+      localStorage.setItem('user', json.user);
+      localStorage.setItem('pass', pass);
+      $('#profile-user').val('');
+      updateLoginState();
+      await pullServerProfile(true);
+    } else {
+      setProfileStatus('Bad login.');
+    }
+  } catch(e) {
+    console.log(e);
+    setProfileStatus('Login failed.');
+  }
+}
+function profileLogout() {
+  localStorage.removeItem('user');
+  localStorage.removeItem('pass');
+  updateLoginState();
+  setProfileStatus('Logged out.');
+}
+function setupProfileFs() {
+  if (profileFsReady) {
+    return profileFsReady;
+  }
+  profileFsReady = new Promise(function(resolve, reject) {
+    try {
+      if (!window.BrowserFS || !window.JSZip) {
+        resolve(false);
+        return;
+      }
+      BrowserFS.install(window);
+      var nodeFs = require('fs');
+      var mfs = new BrowserFS.FileSystem.MountableFileSystem();
+      var imfs = new BrowserFS.FileSystem.InMemory();
+      var afs = new BrowserFS.FileSystem.AsyncMirror(imfs, new BrowserFS.FileSystem.IndexedDB(function(e) {
+        if (e) {
+          reject(e);
+          return;
+        }
+        afs.initialize(function(initError) {
+          if (initError) {
+            reject(initError);
+            return;
+          }
+          mfs.mount('/', afs);
+          BrowserFS.initialize(mfs);
+          profileFs = nodeFs;
+          resolve(true);
+        });
+      }, profileStoreName));
+    } catch(e) {
+      reject(e);
+    }
+  });
+  return profileFsReady;
+}
+async function rmProfileDir(dirPath) {
+  try {
+    var files = profileFs.readdirSync(dirPath);
+    if (files.length > 0) {
+      for await (var file of files) {
+        var filePath = dirPath + '/' + file;
+        if (profileFs.statSync(filePath).isFile()) {
+          profileFs.unlinkSync(filePath);
+        } else {
+          await rmProfileDir(filePath);
+        }
+      }
+    }
+    if (dirPath !== '/') {
+      profileFs.rmdirSync(dirPath);
+    }
+  } catch(e) {
+    console.log(e);
+  }
+}
+async function addProfileFsToZip(zip, item) {
+  if (profileFs.lstatSync(item).isDirectory()) {
+    var items = profileFs.readdirSync(item);
+    if (items.length > 0) {
+      for await (var subPath of items) {
+        await addProfileFsToZip(zip, item + '/' + subPath);
+      }
+    }
+  } else {
+    var data = profileFs.readFileSync(item);
+    var zipPath = item.replace(/^\//,'');
+    zip.file(zipPath, data);
+  }
+}
+async function pullServerProfile(silent) {
+  if (!localStorage.getItem('user') || !localStorage.getItem('pass')) {
+    setProfileStatus('Login first.');
+    return;
+  }
+  setProfileStatus('Pulling from server...');
+  try {
+    await setupProfileFs();
+    var res = await profileRequest({user:localStorage.getItem('user'), pass:localStorage.getItem('pass'), type:'pull'});
+    var json = await res.json();
+    if (json.status !== 'success') {
+      setProfileStatus('Error pulling profile.');
+      return;
+    }
+    var zip = new JSZip();
+    var contents = await zip.loadAsync(json.data, {base64: true});
+    await rmProfileDir('/');
+    for await (var fileName of Object.keys(contents.files)) {
+      if (fileName.endsWith('/') && fileName !== favoritesProfileFile) {
+        if (!profileFs.existsSync('/' + fileName)) {
+          profileFs.mkdirSync('/' + fileName);
+        }
+      }
+    }
+    for await (var pullFileName of Object.keys(contents.files)) {
+      if (!pullFileName.endsWith('/')) {
+        if (pullFileName === favoritesProfileFile) {
+          restoreFavoritesFromProfile(await zip.file(pullFileName).async('string'));
+        } else {
+          var content = await zip.file(pullFileName).async('arraybuffer');
+          profileFs.writeFileSync('/' + pullFileName, Buffer.from(content));
+        }
+      }
+    }
+    setProfileStatus('Pulled from server.');
+    if (!$('#favorites-panel').hasClass('hidden')) {
+      renderFavoritesPanel();
+    }
+    if (!silent) {
+      alert('Pulled from server');
+    }
+  } catch(e) {
+    console.log(e);
+    setProfileStatus('Error pulling profile.');
+  }
+}
+async function pushServerProfile(silent) {
+  if (profilePushInFlight || !localStorage.getItem('user') || !localStorage.getItem('pass')) {
+    return;
+  }
+  profilePushInFlight = true;
+  setProfileStatus('Pushing to server...');
+  try {
+    await setupProfileFs();
+    var zip = new JSZip();
+    var items = profileFs.readdirSync('/');
+    for await (var item of items) {
+      await addProfileFsToZip(zip, '/' + item);
+    }
+    zip.file(favoritesProfileFile, localStorage.getItem('ejsFavorites') || '[]');
+    var base64 = await zip.generateAsync({type:"base64"});
+    var res = await profileRequest({user:localStorage.getItem('user'), pass:localStorage.getItem('pass'), type:'push', data:base64});
+    var json = await res.json();
+    setProfileStatus(json.status == 'success' ? 'Pushed to server.' : 'Error pushing profile.');
+    if (!silent && json.status == 'success') {
+      alert('Pushed to server');
+    }
+  } catch(e) {
+    console.log(e);
+    setProfileStatus('Error pushing profile.');
+  }
+  profilePushInFlight = false;
+}
+function queueProfilePush() {
+  if (!localStorage.getItem('user') || !localStorage.getItem('pass')) {
+    return;
+  }
+  clearTimeout(profilePushTimeout);
+  profilePushTimeout = setTimeout(function() {
+    pushServerProfile(true);
+  }, 2000);
+}
+function scheduleProfileAutoPush() {
+  if (profilePushTimer || !localStorage.getItem('user') || !localStorage.getItem('pass')) {
+    return;
+  }
+  profilePushTimer = setInterval(function() {
+    pushServerProfile(true);
+  }, 300000);
+}
 function readFavoriteRecord(button, favoriteId) {
   var $button = $(button);
   return {
@@ -144,6 +385,7 @@ function toggleFavorite(event, favoriteId, button) {
   if (!$('#favorites-panel').hasClass('hidden')) {
     renderFavoritesPanel();
   }
+  queueProfilePush();
 }
 function openSearchPanel() {
   closeFavoritesPanel();
@@ -475,6 +717,7 @@ function launch(active_item) {
     };
     rendermenu([config, 0]);
   } else if (type == 'game') {
+    scheduleProfileAutoPush();
     // Disable keyevents and hash watching
     window.exit = false;
     $(window).off('hashchange');
@@ -1045,6 +1288,10 @@ async function loadjson(name, active_item) {
 }
 
 window.onload = function() {
+  updateLoginState();
+  setupProfileFs().catch(function(e) {
+    console.log(e);
+  });
   $('#game-search').on('input', debounce(runGameSearch, 150));
   $('#console-filter').on('change', runGameSearch);
   $('#art-filter').on('change', runGameSearch);
@@ -1059,5 +1306,10 @@ window.onload = function() {
   }
   $(window).on('hashchange', function() {
     window.location.reload();
+  });
+  document.addEventListener('visibilitychange', function() {
+    if (document.visibilityState === 'hidden') {
+      pushServerProfile(true);
+    }
   });
 };

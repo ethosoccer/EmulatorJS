@@ -1,0 +1,247 @@
+:root {
+  --bg: #f6f8fb;
+  --panel: #ffffff;
+  --panel-soft: #eef3f7;
+  --text: #17202a;
+  --muted: #667085;
+  --line: #d7dee8;
+  --line-strong: #b8c3d0;
+  --accent: #2f7d8c;
+  --accent-strong: #246777;
+  --accent-soft: #d9eef2;
+  --danger: #bf3434;
+  --shadow: 0 18px 45px rgba(39, 52, 67, 0.18);
+  color-scheme: light;
+}
+
+html[data-theme="dark"] {
+  --bg: #101318;
+  --panel: #181d24;
+  --panel-soft: #202734;
+  --text: #e8edf5;
+  --muted: #9aa6b8;
+  --line: #2c3544;
+  --line-strong: #3c485b;
+  --accent: #57b7c6;
+  --accent-strong: #7bd0dc;
+  --accent-soft: #173840;
+  --danger: #ff7770;
+  --shadow: 0 22px 60px rgba(0, 0, 0, 0.46);
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 15px;
+  line-height: 1.45;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.right {
+  float: right;
+  margin-right: 5px;
+}
+
+.toolbar {
+  min-height: 58px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+
+#profileButtons {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+#username {
+  font-weight: 800;
+  margin-right: 6px;
+}
+
+#syncButtons {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-left: auto;
+}
+
+#loginEntry {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.file-page {
+  padding: 20px;
+}
+
+.file-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.file-header h1 {
+  margin: 0;
+  font-size: 30px;
+}
+
+.file-header p,
+#touchpad p {
+  margin: 4px 0 0;
+  color: var(--muted);
+}
+
+.file-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+input,
+select {
+  min-height: 36px;
+  max-width: 100%;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  padding: 8px 10px;
+  font: inherit;
+}
+
+button {
+  min-height: 36px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+  margin: 0;
+  padding: 8px 12px;
+  font: inherit;
+  font-weight: 700;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+button:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+#theme-toggle {
+  color: var(--accent-strong);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.directory,
+.file {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.deleteButton {
+  margin: 0 !important;
+  float: right;
+  color: var(--danger);
+}
+
+.fileTable {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: 0 8px 24px rgba(24, 35, 48, 0.08);
+}
+
+td,
+th {
+  border-bottom: 1px solid var(--line);
+  padding: 10px;
+  text-align: left;
+}
+
+th {
+  color: var(--text);
+  background: var(--panel-soft);
+}
+
+tr:nth-child(even) {
+  background-color: color-mix(in srgb, var(--panel-soft) 54%, transparent);
+}
+
+tr:hover {
+  background-color: var(--accent-soft);
+}
+
+#dropzone {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 9999999999;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.5);
+  transition: visibility 175ms, opacity 175ms;
+}
+
+#loading {
+  display: inline-block;
+  width: 50px;
+  height: 50px;
+  border: 3px solid rgba(47, 125, 140, .25);
+  border-radius: 50%;
+  border-top-color: var(--accent);
+  animation: spin 1s ease-in-out infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 760px) {
+  .toolbar,
+  .file-page {
+    padding: 12px;
+  }
+
+  #syncButtons {
+    margin-left: 0;
+  }
+
+  .fileTable {
+    min-width: 640px;
+  }
+
+  #filebrowser {
+    overflow-x: auto;
+  }
+}

@@ -44,9 +44,25 @@ Advanced search filters include console, logo artwork status, preview video stat
 
 Favorites are stored in browser `localStorage` using the console path and game name. Games can be toggled from the visible game list with the heart button, and the Favorites control opens a separate popup with the full saved list and per-game remove buttons.
 
+The frontend also has a Profile login popup that uses the same `/profile` endpoint as the file browser. Logging in pulls the server profile, and logged-in users can manually pull or push from that popup.
+
+Favorites are included in profile sync as `.emulatorjs-favorites.json` inside the pushed profile zip. Pull restores that file into browser `localStorage`, while save/state files continue to use the existing `RetroArch` IndexedDB profile storage.
+
+Profile push is best-effort automatic while logged in: changing favorites queues a push, and the frontend also pushes every five minutes while the page is active. Browser games do not expose one reliable cross-core "save happened" event, so the periodic sync covers normal in-game saves and quicksaves without trying to hook every emulator core separately.
+
+### File Browser Styling
+
+The overlay replaces the LinuxServer helper app's file browser assets:
+
+- `frontend/filebrowser.html`
+- `frontend/css/filebrowser.css`
+- `frontend/js/filebrowser.js`
+
+The file browser now shares the modern admin styling and dark-mode toggle. Its existing profile Pull/Push buttons also include favorites in the profile zip.
+
 ### Frontend Cache Policy
 
-The overlay replaces `/etc/nginx/site-confs/default` to make the frontend shell less sticky in normal browser sessions. The root document, `index.html`, `css/index.css`, and `js/index.js` are served with no-cache headers, while larger ROM, artwork, video, and emulator assets keep the default static-file behavior.
+The overlay replaces `/etc/nginx/site-confs/default` to make the frontend shell less sticky in normal browser sessions. The root document, `index.html`, `filebrowser.html`, the active frontend CSS, and the active frontend JS files are served with no-cache headers, while larger ROM, artwork, video, and emulator assets keep the default static-file behavior.
 
 The frontend and admin HTML also use versioned CSS/JS URLs so new overlay builds force browsers to request the updated entrypoint files.
 

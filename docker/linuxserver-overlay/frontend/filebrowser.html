@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <script>
+      (function() {
+        var savedTheme = localStorage.getItem('ejs-admin-theme');
+        var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+        document.documentElement.setAttribute('data-theme', savedTheme || (prefersDark ? 'dark' : 'light'));
+      }());
+    </script>
+    <link rel="stylesheet" href="css/filebrowser.css?v=20260419-profile-sync">
+    <link rel="stylesheet" href="css/vendor/jquery.modal.min.css">
+    <script type="text/javascript" src="js/vendor/jquery.min.js"></script>
+    <script type="text/javascript" src="js/vendor/jquery.modal.min.js"></script>
+    <script type="text/javascript" src="js/vendor/browserfs.min.js"></script>
+    <script type="text/javascript" src="js/vendor/jszip.min.js"></script>
+    <script type="text/javascript" src="js/filebrowser.js?v=20260419-profile-sync"></script>
+  </head>
+  <body>
+  <div id="popup" class="modal">
+    <div id="popupContents"></div>
+  </div>
+  <div class="hidden toolbar" id="profile">
+    <span id=profileButtons">
+      <span id="username"></span>
+      <span id="loginEntry">
+        <input id="user" type="text" placeholder="user"></input>
+        <input id="pass" type="password" placeholder="pass"></input>
+        <button id="login" onclick="login()">Login</button>
+      </span>
+      <button id="logout" class="hidden" onclick="logout()">Logout</button>
+      <span id="syncButtons" class="hidden">
+        <button class="right" onclick="pushProfile()">&uarr; Push to Server</button>
+        <button class="right" onclick="pullProfile()">&darr; Pull from Server</button>
+      </span>
+      <button id="defaultPull" class="right" onclick="defaultProfile()">Pull Default Config</button>
+      <button id="theme-toggle" class="right" onclick="toggleFilebrowserTheme()">Dark mode</button>
+    </span>
+  </div>
+  <div class="hidden toolbar" id="touchpad">
+      <p>TouchScreen control type: <select name="touch" id="touch">
+        <option value="auto">Auto</option>
+	<option value="false">Disabled</option>
+        <option value="default">Default</option>
+        <option value="simple">Simple</option>
+        <option value="modern">Modern</option>
+      </select>
+      <button onclick="touchSave()">Save</button>
+    </p>
+  </div>
+  <main class="file-page">
+  <header class="file-header">
+    <div>
+      <h1>File Browser</h1>
+      <p>Manage local browser storage, saves, states, and profile backups.</p>
+    </div>
+  </header>
+  <section id="buttons" class="file-actions">
+    <input id="folderName" type="text" placeholder="Enter Directory Name"></input>
+    <button onclick="createFolder()">Create Folder</button>
+    <button onclick="$('#uploadInput').trigger( 'click' )">Upload Files</button>
+    <input class="hidden" id="uploadInput" type='file' onchange="upload(this);" multiple>
+    <button class="right" onclick="downloadBackup()">DL Full Backup</button>
+    <button class="right" onclick="$('#uploadBackup').trigger( 'click' )">Upload Full Backup</button>
+    <input class="hidden" id="uploadBackup" type='file' onchange="uploadBackup(this);" />
+  </section>
+  <div id="filebrowser"></div>
+  </main>
+  <div ondrop="dropFiles(event)" ondragover="allowDrop(event)" style="visibility:hidden;opacity:0" id="dropzone">
+  </div>
+  </body>
+</html>

@@ -6,10 +6,12 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="apple-touch-icon" href="icon.png" crossorigin="use-credentials">
     <link rel="manifest" href="manifest.json" crossorigin="use-credentials">
-    <link rel="stylesheet" href="css/index.css?v=20260419-favorites-fallback">
+    <link rel="stylesheet" href="css/index.css?v=20260419-profile-sync">
     <script src="js/vendor/jquery.min.js"></script>
     <script src="js/vendor/hammer.min.js"></script>
-    <script src="js/index.js?v=20260419-favorites-fallback"></script>
+    <script src="js/vendor/browserfs.min.js"></script>
+    <script src="js/vendor/jszip.min.js"></script>
+    <script src="js/index.js?v=20260419-profile-sync"></script>
   </head>
   <body>
     <div id="menu">
@@ -19,6 +21,7 @@
       <img class="full-main" onclick="fullscreen()" src="css/fullscreen.svg"/>
       <button id="search-button" class="menu-tool menu-search" type="button" onclick="openSearchPanel()">Search</button>
       <button id="favorites-button" class="menu-tool menu-favorites" type="button" onclick="showFavorites()">Favorites</button>
+      <button id="login-button" class="menu-tool menu-login" type="button" onclick="openLoginPanel()">Login</button>
       <div id="search-panel" class="search-panel hidden">
         <div class="search-header">
           <h2>Find Games</h2>
@@ -56,6 +59,28 @@
         </div>
         <div id="favorites-status" class="search-status">Loading favorites...</div>
         <div id="favorites-results" class="search-results"></div>
+      </div>
+      <div id="login-panel" class="login-panel hidden">
+        <div class="search-header">
+          <h2>Profile</h2>
+          <button type="button" onclick="closeLoginPanel()">Close</button>
+        </div>
+        <div id="profile-logged-out">
+          <input id="profile-user" type="text" placeholder="user" autocomplete="username">
+          <input id="profile-pass" type="password" placeholder="pass" autocomplete="current-password">
+          <div class="search-actions">
+            <button type="button" onclick="profileLogin()">Login</button>
+          </div>
+        </div>
+        <div id="profile-logged-in" class="hidden">
+          <p id="profile-name"></p>
+          <div class="search-actions">
+            <button type="button" onclick="pullServerProfile()">Pull from Server</button>
+            <button type="button" onclick="pushServerProfile()">Push to Server</button>
+            <button type="button" onclick="profileLogout()">Logout</button>
+          </div>
+        </div>
+        <div id="profile-status" class="search-status"></div>
       </div>
       <video autoplay muted loop id="bgvid">
         <source id="vid" type="video/mp4">

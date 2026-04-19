@@ -38,6 +38,7 @@ canvas {
 
 .search-panel.hidden,
 .favorites-panel.hidden,
+.login-panel.hidden,
 .advanced-search.hidden {
   display: none;
 }
@@ -140,8 +141,13 @@ canvas {
   left: 12.6vw;
 }
 
+.menu-login {
+  left: 20vw;
+}
+
 .search-panel,
-.favorites-panel {
+.favorites-panel,
+.login-panel {
   position: absolute;
   top: 6vh;
   left: 1vw;
@@ -173,8 +179,10 @@ canvas {
 
 .search-panel button,
 .favorites-panel button,
+.login-panel button,
 .search-panel input,
-.search-panel select {
+.search-panel select,
+.login-panel input {
   border: 1px solid rgba(255, 255, 255, .28);
   border-radius: 8px;
   background: rgba(255, 255, 255, .08);
@@ -183,7 +191,8 @@ canvas {
 }
 
 .search-panel button,
-.favorites-panel button {
+.favorites-panel button,
+.login-panel button {
   min-height: 34px;
   padding: 7px 10px;
   cursor: pointer;
@@ -191,12 +200,14 @@ canvas {
 }
 
 .search-panel button:hover,
-.favorites-panel button:hover {
+.favorites-panel button:hover,
+.login-panel button:hover {
   background: rgba(255, 255, 255, .16);
 }
 
 .search-panel input,
-.search-panel select {
+.search-panel select,
+.login-panel input {
   width: 100%;
   min-height: 38px;
   padding: 8px 10px;
@@ -321,6 +332,10 @@ canvas {
     left: 146px;
   }
 
+  .menu-login {
+    left: 228px;
+  }
+
   .menu-tool {
     min-height: 26px;
     padding: 3px 8px;
@@ -328,7 +343,8 @@ canvas {
   }
 
   .search-panel,
-  .favorites-panel {
+  .favorites-panel,
+  .login-panel {
     top: 48px;
     left: 10px;
   }

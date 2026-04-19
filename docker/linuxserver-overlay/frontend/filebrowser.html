@@ -9,20 +9,20 @@
         document.documentElement.setAttribute('data-theme', savedTheme || (prefersDark ? 'dark' : 'light'));
       }());
     </script>
-    <link rel="stylesheet" href="css/filebrowser.css?v=20260419-admin-gate">
+    <link rel="stylesheet" href="css/filebrowser.css?v=20260419-user-modal">
     <link rel="stylesheet" href="css/vendor/jquery.modal.min.css">
     <script type="text/javascript" src="js/vendor/jquery.min.js"></script>
     <script type="text/javascript" src="js/vendor/jquery.modal.min.js"></script>
     <script type="text/javascript" src="js/vendor/browserfs.min.js"></script>
     <script type="text/javascript" src="js/vendor/jszip.min.js"></script>
-    <script type="text/javascript" src="js/filebrowser.js?v=20260419-admin-gate"></script>
+    <script type="text/javascript" src="js/filebrowser.js?v=20260419-user-modal"></script>
   </head>
   <body>
   <div id="popup" class="modal">
     <div id="popupContents"></div>
   </div>
   <div class="hidden toolbar" id="profile">
-    <span id=profileButtons">
+    <span id="profileButtons">
       <span id="username"></span>
       <span id="loginEntry">
         <input id="user" type="text" placeholder="user"></input>
@@ -72,31 +72,36 @@
     <input class="hidden" id="uploadBackup" type='file' onchange="uploadBackup(this);" />
   </section>
   <div id="filebrowser"></div>
-  <section id="userManagement" class="admin-panel hidden">
-    <div class="file-header">
-      <div>
-        <h1>User Management</h1>
-        <p>Create users, change roles, and control whether the main game browser requires login.</p>
-      </div>
-    </div>
-    <div class="file-actions">
-      <input id="newUser" type="text" placeholder="New username">
-      <input id="newPass" type="password" placeholder="New password">
-      <select id="newRole">
-        <option value="user">User</option>
-        <option value="admin">Admin</option>
-      </select>
-      <button onclick="createManagedUser()">Create User</button>
-    </div>
-    <label class="setting-row">
-      <input id="requireMainLogin" type="checkbox">
-      Require login before showing the main game browser
-    </label>
-    <button onclick="saveAdminSettings()">Save Settings</button>
-    <div id="usersList"></div>
-  </section>
   </main>
   </div>
+  <section id="userManagement" class="admin-modal hidden" role="dialog" aria-modal="true" aria-labelledby="userManagementTitle" onclick="handleUserManagementBackdrop(event)">
+    <div class="admin-modal-card">
+      <div class="file-header modal-header">
+        <div>
+          <h1 id="userManagementTitle">User Management</h1>
+          <p>Create users, change roles, and control whether the main game browser requires login.</p>
+        </div>
+        <button type="button" onclick="closeUserManagement()">Close</button>
+      </div>
+      <div class="file-actions modal-actions">
+        <input id="newUser" type="text" placeholder="New username">
+        <input id="newPass" type="password" placeholder="New password">
+        <select id="newRole">
+          <option value="user">User</option>
+          <option value="admin">Admin</option>
+        </select>
+        <button type="button" onclick="createManagedUser()">Create User</button>
+      </div>
+      <div class="settings-panel">
+        <label class="setting-row">
+          <input id="requireMainLogin" type="checkbox">
+          Require login before showing the main game browser
+        </label>
+        <button type="button" onclick="saveAdminSettings()">Save Settings</button>
+      </div>
+      <div id="usersList" class="modal-table-wrap"></div>
+    </div>
+  </section>
   <div ondrop="dropFiles(event)" ondragover="allowDrop(event)" style="visibility:hidden;opacity:0" id="dropzone">
   </div>
   </body>

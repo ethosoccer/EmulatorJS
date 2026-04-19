@@ -48,6 +48,10 @@ body {
   line-height: 1.45;
 }
 
+body.modal-open {
+  overflow: hidden;
+}
+
 .hidden {
   display: none !important;
 }
@@ -124,6 +128,19 @@ body {
 .setting-row input {
   width: auto;
   min-height: auto;
+}
+
+.settings-panel {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  margin: 14px 0 16px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-soft);
 }
 
 .file-header {
@@ -244,6 +261,47 @@ tr:hover {
   transition: visibility 175ms, opacity 175ms;
 }
 
+.admin-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 999999;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(8, 12, 18, 0.62);
+  backdrop-filter: blur(4px);
+}
+
+.admin-modal-card {
+  width: min(980px, calc(100vw - 36px));
+  min-width: min(520px, calc(100vw - 36px));
+  height: min(760px, calc(100vh - 36px));
+  min-height: min(460px, calc(100vh - 36px));
+  overflow: auto;
+  resize: both;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  padding: 20px;
+}
+
+.modal-header {
+  align-items: flex-start;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.modal-actions {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) minmax(130px, auto) auto;
+  margin: 18px 0 0;
+}
+
+.modal-table-wrap {
+  overflow-x: auto;
+}
+
 #loading {
   display: inline-block;
   width: 50px;
@@ -291,6 +349,26 @@ tr:hover {
   .admin-panel {
     margin: 12px;
     padding: 12px;
+  }
+
+  .admin-modal {
+    align-items: stretch;
+    padding: 10px;
+  }
+
+  .admin-modal-card {
+    width: 100%;
+    min-width: 0;
+    height: calc(100vh - 20px);
+    min-height: 0;
+    resize: none;
+    padding: 14px;
+  }
+
+  .modal-actions,
+  .settings-panel {
+    display: grid;
+    grid-template-columns: 1fr;
   }
 
   input,

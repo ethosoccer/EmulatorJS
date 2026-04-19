@@ -545,7 +545,27 @@ async function createManagedUser() {
 }
 
 function showUserManagement() {
-  $('#userManagement').toggleClass('hidden');
+  if (localStorage.getItem('role') !== 'admin') {
+    return;
+  }
+  $('#userManagement').removeClass('hidden');
+  $('body').addClass('modal-open');
+  loadUsers();
+  loadAdminSettings();
+  window.setTimeout(function() {
+    $('#newUser').trigger('focus');
+  }, 50);
+}
+
+function closeUserManagement() {
+  $('#userManagement').addClass('hidden');
+  $('body').removeClass('modal-open');
+}
+
+function handleUserManagementBackdrop(event) {
+  if (event.target && event.target.id === 'userManagement') {
+    closeUserManagement();
+  }
 }
 
 async function loadAdminSettings() {
@@ -756,4 +776,9 @@ async function setupMounts() {
 window.onload = function() {
   updateThemeToggle();
   loadProfile();
+  window.addEventListener('keydown', function(event) {
+    if (event.key === 'Escape' && !$('#userManagement').hasClass('hidden')) {
+      closeUserManagement();
+    }
+  });
 }

@@ -10,6 +10,12 @@ The art downloader retries failed IPFS downloads by reconnecting to a hardcoded 
 
 This overlay catches and logs that peer reconnect failure, then lets the downloader continue retrying the asset.
 
+It also makes failed IPFS assets move on faster:
+
+- `IPFS_DOWNLOAD_TIMEOUT` defaults to `7000` ms instead of the upstream 20 seconds.
+- `IPFS_DOWNLOAD_ATTEMPTS` defaults to `2`.
+- `IPFS_RECONNECT_DEFAULT_PEER` defaults to disabled. Set it to `true` to retry the hardcoded default peer.
+
 ## Build
 
 From the repository root:

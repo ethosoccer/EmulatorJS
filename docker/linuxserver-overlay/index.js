@@ -30,6 +30,9 @@ var configPath = dataRoot + 'config/';
 var hashPath = dataRoot + 'hashes/';
 var metaPath = dataRoot + 'metadata/';
 var defaultPeer = '/ip4/65.109.29.184/tcp/4001/p2p/12D3KooWAQZgCmhRo6V6yzGWTtw57xSRBnTn5kGMqzahFKyt5CW3';
+var ipfsDownloadTimeout = Number(process.env.IPFS_DOWNLOAD_TIMEOUT || 7000);
+var ipfsDownloadAttempts = Number(process.env.IPFS_DOWNLOAD_ATTEMPTS || 2);
+var reconnectDefaultPeer = process.env.IPFS_RECONNECT_DEFAULT_PEER === 'true';
 var metaVariables = [
   ['vid', 'videos', '.mp4'],
   ['logo', 'logos', '.png'],
@@ -222,7 +225,7 @@ io.on('connection', async function (socket) {
     let writeStream = fs.createWriteStream(file);
     socket.emit('modaldata', 'Downloading: ' + file);
     try {
-      for await (var fileStream of ipfs.cat(cid, {'timeout': 20000})) {
+      for await (var fileStream of ipfs.cat(cid, {'timeout': ipfsDownloadTimeout})) {
         writeStream.write(fileStream);
       };
       writeStream.end();
@@ -234,11 +237,13 @@ io.on('connection', async function (socket) {
       };
     } catch (e) {
       writeStream.end();
-      if (count < 3) {
-        try {
-          await ipfsDefaultPeer();
-        } catch (peerError) {
-          console.log(peerError);
+      if (count < ipfsDownloadAttempts) {
+        if (reconnectDefaultPeer) {
+          try {
+            await ipfsDefaultPeer();
+          } catch (peerError) {
+            console.log('Default IPFS peer unavailable; continuing retry:', peerError.message || peerError);
+          };
         };
         return await ipfsDownload(cid, file, count);
       } else {

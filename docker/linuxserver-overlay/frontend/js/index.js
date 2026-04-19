@@ -50,6 +50,19 @@ function escapeHtml(value) {
     }[char];
   });
 }
+function hasUsableValue(value) {
+  return typeof value !== 'undefined' && value !== null && String(value).trim() !== '' && String(value) !== 'undefined';
+}
+function favoriteNameFallback(favoriteId) {
+  if (!hasUsableValue(favoriteId)) {
+    return 'Unknown game';
+  }
+  var name = String(favoriteId).split('::').slice(1).join('::');
+  return hasUsableValue(name) ? name : 'Unknown game';
+}
+function cleanGameName(name, favoriteId) {
+  return hasUsableValue(name) ? String(name) : favoriteNameFallback(favoriteId);
+}
 function getFavoriteIds() {
   return getFavorites().map(function(favorite) {
     return favorite.id;
@@ -66,6 +79,12 @@ function getFavorites() {
         return favorite;
       }).filter(function(favorite) {
         return favorite && favorite.id && favorite.id !== 'undefined' && favorite.id.indexOf('undefined::') !== 0;
+      }).map(function(favorite) {
+        favorite.name = cleanGameName(favorite.name, favorite.id);
+        favorite.root = hasUsableValue(favorite.root) ? favorite.root : 'main';
+        favorite.title = hasUsableValue(favorite.title) ? favorite.title : 'Games';
+        favorite.index = Number(favorite.index || 0);
+        return favorite;
       });
     }
   } catch(e) {
@@ -80,7 +99,7 @@ function readFavoriteRecord(button, favoriteId) {
   var $button = $(button);
   return {
     id: favoriteId,
-    name: $button.attr('data-favorite-name') || favoriteId.split('::').slice(1).join('::') || favoriteId,
+    name: cleanGameName($button.attr('data-favorite-name'), favoriteId),
     root: $button.attr('data-favorite-root') || 'main',
     title: $button.attr('data-favorite-title') || 'Games',
     index: Number($button.attr('data-favorite-index') || 0)
@@ -186,7 +205,7 @@ function renderFavoritesPanel() {
     var root = item.root || 'main';
     var index = Number(item.index || 0);
     var openButton = $('<button>').addClass('search-result').attr('type', 'button').attr('onclick', 'openFavoriteResult("' + root + '",' + index + ')');
-    openButton.append($('<span>').addClass('search-result-title').html('&hearts; ' + escapeHtml(item.name)));
+    openButton.append($('<span>').addClass('search-result-title').html('&hearts; ' + escapeHtml(cleanGameName(item.name, item.id))));
     openButton.append($('<span>').addClass('search-result-meta').text(item.title || item.root || 'Games'));
     var removeButton = $('<button>').addClass('favorite-remove').attr('type', 'button').attr('title', 'Remove from favorites').text('Remove');
     removeButton.on('click', function(favoriteId) {
@@ -638,7 +657,7 @@ async function rendermenu(datas) {
       var has_logo = data.defaults.has_logo;
     };
     // Render differently for multi disc menus
-    if (data.hasOwnProperty('multi_name')) {
+    if (data.hasOwnProperty('multi_name') && hasUsableValue(data.multi_name)) {
       var romName = data.multi_name;
     } else {
       var romName = name;
@@ -661,10 +680,11 @@ async function rendermenu(datas) {
     var itemType = item.hasOwnProperty('type') ? item.type : data.defaults.type;
     var itemPath = item.hasOwnProperty('path') ? item.path : data.defaults.path;
     var itemTitle = data.title || itemPath || 'Games';
-    var favoriteId = itemPath + '::' + romName;
+    var favoriteName = cleanGameName(romName, itemPath + '::' + name);
+    var favoriteId = itemPath + '::' + favoriteName;
     var favoriteButton = '';
     if (itemType == 'game') {
-      favoriteButton = '<button class="favorite-toggle" type="button" data-favorite-id="' + escapeHtml(favoriteId) + '" data-favorite-name="' + escapeHtml(romName) + '" data-favorite-root="' + escapeHtml(root) + '" data-favorite-title="' + escapeHtml(itemTitle) + '" data-favorite-index="' + count + '" onclick="toggleFavorite(event, this.getAttribute(\'data-favorite-id\'), this)" aria-label="Toggle favorite" title="Add to favorites">&hearts;</button>';
+      favoriteButton = '<button class="favorite-toggle" type="button" data-favorite-id="' + escapeHtml(favoriteId) + '" data-favorite-name="' + escapeHtml(favoriteName) + '" data-favorite-root="' + escapeHtml(root) + '" data-favorite-title="' + escapeHtml(itemTitle) + '" data-favorite-index="' + count + '" onclick="toggleFavorite(event, this.getAttribute(\'data-favorite-id\'), this)" aria-label="Toggle favorite" title="Add to favorites">&hearts;</button>';
     }
     $('#games-list').append('\
       <div id="m' + count + '">\

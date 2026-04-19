@@ -28,6 +28,11 @@ canvas {
   height: 100vh;
 }
 
+.console-filter-active .games-list {
+  top: 74px;
+  height: calc(100vh - 74px);
+}
+
 .artwork {
   width: auto;
 }
@@ -38,6 +43,69 @@ canvas {
 
 #file-browser-link.hidden {
   display: none;
+}
+
+#console-list-tools.hidden {
+  display: none;
+}
+
+.console-list-tools {
+  position: fixed;
+  top: 36px;
+  right: 20px;
+  z-index: 999998;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  width: min(40vw, 520px);
+  color: white;
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+.console-list-tools input,
+.console-list-tools button {
+  min-height: 34px;
+  border: 1px solid rgba(255, 255, 255, .38);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, .42);
+  color: white;
+  font: inherit;
+}
+
+.console-list-tools input {
+  min-width: 0;
+  padding: 7px 10px;
+}
+
+.console-list-tools button {
+  padding: 7px 10px;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.console-list-tools button:hover,
+.console-list-tools input:focus {
+  background: rgba(255, 255, 255, .16);
+}
+
+#console-list-status {
+  grid-column: 1 / -1;
+  color: rgba(255, 255, 255, .76);
+  font-size: 12px;
+  min-height: 16px;
+  text-align: right;
+}
+
+.console-empty {
+  margin-top: 16vh;
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, .28);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, .38);
+  color: white;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 18px;
+  text-align: center;
 }
 
 body.profile-required .page-container,
@@ -374,6 +442,19 @@ body.profile-required .login-panel {
   .favorite-result-row {
     grid-template-columns: 1fr;
   }
+
+  .console-list-tools {
+    top: 112px;
+    left: 8px;
+    right: 8px;
+    width: calc(100vw - 16px);
+    z-index: 999999;
+  }
+
+  .console-filter-active .games-list {
+    top: 174px;
+    height: calc(100vh - 174px);
+  }
 }
 
 @media (max-width: 420px) {
@@ -387,6 +468,15 @@ body.profile-required .login-panel {
   .login-panel {
     top: 112px;
     max-height: calc(100vh - 124px);
+  }
+
+  .console-list-tools {
+    top: 150px;
+  }
+
+  .console-filter-active .games-list {
+    top: 212px;
+    height: calc(100vh - 212px);
   }
 }
 

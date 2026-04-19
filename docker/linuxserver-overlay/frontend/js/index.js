@@ -668,6 +668,9 @@ function openFavoriteResult(root, index) {
   closeFavoritesPanel();
   openSearchResult(root, index);
 }
+function clearConsoleListFilter() {
+  $('#console-list-search').val('').trigger('input');
+}
 // Load and play video
 var loadvideo = debounce(function(active_item) {
   var name = $('#i' + active_item.toString()).data('name');
@@ -745,13 +748,14 @@ function launch(active_item) {
   var type = $('#i' + active_item.toString()).data('type');
   var multi = $('#i' + active_item.toString()).data('multi_disc');
   var root = $('#menu').data('root');
+  var originalActiveItem = Number($('#i' + active_item.toString()).attr('data-original-index') || active_item);
   $(document).attr('title', name);
   if (type == 'menu') {
     window.location.href = '#' + name
   } else if (multi > 1) {
     var config = $('#menu').data('config');
     config.display_items = multi;
-    config.parent = config.root + '---' + active_item.toString();
+    config.parent = config.root + '---' + originalActiveItem.toString();
     config.multi_name = name;
     var baseItem = config.items[name];
     config.items = {};
@@ -866,7 +870,7 @@ function launch(active_item) {
         };
         window.dispatchEvent(new Event('beforeunload'));
         setTimeout(function(){
-          window.location.href = '#' + root + '---' + active_item;
+          window.location.href = '#' + root + '---' + originalActiveItem;
           window.location.reload();
 	}, 1000);
       }
@@ -884,24 +888,30 @@ async function rendermenu(datas) {
   var root = data.root;
   $('#menu').data('root', root);
   var parent = data.parent;
-  var items = data.items;
-  if (Object.keys(items).length == 0) {
+  var allItems = {};
+  var originalIndexByName = {};
+  var originalCount = 0;
+  for await (var originalName of Object.keys(data.items)) {
+    var originalItem = data.items[originalName];
+    if ((originalItem.hasOwnProperty('cloneof')) && (data.items.hasOwnProperty(originalItem.cloneof))) {
+      continue;
+    }
+    allItems[originalName] = originalItem;
+    originalIndexByName[originalName] = originalCount;
+    originalCount++;
+  };
+  data.items = allItems;
+  var items = allItems;
+  if (Object.keys(allItems).length == 0) {
     alert('No items to load, please add some games');
     return '';
   };
-  for await (var name of Object.keys(items)) {
-    var item = data.items[name];
-    if ((item.hasOwnProperty('cloneof')) && (items.hasOwnProperty(item.cloneof))) {
-      delete items[name];
-    }
-  };
-  var items_length = Object.keys(items).length - 1;
+  var items_length = Object.keys(allItems).length - 1;
   // Determine counts and style based on menu items
   var display_items = data.display_items;
   if (typeof active_item == 'undefined'){
     var active_item = Math.floor(display_items/2);
   };
-  var logo_load_start = active_item - Math.floor(display_items/2);
   var image_height = Math.floor(100/display_items).toString() + 'vh';
   // Render zoom effect on active item
   function highlight(active_item) {
@@ -922,94 +932,146 @@ async function rendermenu(datas) {
   } else {
     var shrink = 'shrink-mobile';
   };
-  // Loop items loaded from json to build the game menu divs
-  var count = 0;
   var jumpIndex = {};
   var letters = "abcdefghijklmnopqrstuvwxyz".split("");
-  for await (var name of Object.keys(items)) {
-    // Generate an index table based on alphabetical order ignoring numbers
-    if (count == 0) {
-      jumpIndex['0'] = count;
+  function renderConsoleFilterState(totalCount, filteredCount, query) {
+    var showFilter = root !== 'main' && !(data.hasOwnProperty('multi_name') && hasUsableValue(data.multi_name));
+    $('#console-list-tools').toggleClass('hidden', !showFilter);
+    $('#menu').toggleClass('console-filter-active', showFilter);
+    if (!showFilter) {
+      $('#console-list-search').val('');
+      $('#console-list-status').empty();
+      return;
+    }
+    if (query) {
+      $('#console-list-status').text(filteredCount + ' of ' + totalCount + ' shown');
     } else {
-      letterLoop:
-      for (let letter of letters) {
-        let startLetter = name.charAt(0).toLowerCase();
-        if ((! jumpIndex.hasOwnProperty(startLetter)) && (letter == startLetter)) {
-          jumpIndex[letter] = count;
-          break letterLoop;
+      $('#console-list-status').text(totalCount + ' games');
+    }
+  }
+  function renderMenuItems(nextActiveItem) {
+    var showFilter = root !== 'main' && !(data.hasOwnProperty('multi_name') && hasUsableValue(data.multi_name));
+    var query = showFilter ? ($('#console-list-search').val() || '').toLowerCase().trim() : '';
+    var filteredNames = Object.keys(allItems).filter(function(name) {
+      return !query || name.toLowerCase().indexOf(query) !== -1;
+    });
+    items = {};
+    for (var filteredName of filteredNames) {
+      items[filteredName] = allItems[filteredName];
+    }
+    data.items = items;
+    items_length = filteredNames.length - 1;
+    jumpIndex = {};
+    $('#games-list').empty();
+    $('#active-list').empty();
+    renderConsoleFilterState(Object.keys(allItems).length, filteredNames.length, query);
+    if (filteredNames.length === 0) {
+      active_item = 0;
+      $('#active-list').append('<div class="console-empty">No games match "' + escapeHtml($('#console-list-search').val() || '') + '".</div>');
+      $('#vid').attr('src', '');
+      $('#bgvid').trigger('load');
+      return;
+    }
+    if (typeof nextActiveItem == 'number' && !isNaN(nextActiveItem)) {
+      active_item = Math.max(0, Math.min(nextActiveItem, items_length));
+    } else if (active_item > items_length) {
+      active_item = 0;
+    }
+    var count = 0;
+    for (var name of filteredNames) {
+      // Generate an index table based on alphabetical order ignoring numbers
+      if (count == 0) {
+        jumpIndex['0'] = count;
+      } else {
+        letterLoop:
+        for (let letter of letters) {
+          let startLetter = name.charAt(0).toLowerCase();
+          if ((! jumpIndex.hasOwnProperty(startLetter)) && (letter == startLetter)) {
+            jumpIndex[letter] = count;
+            break letterLoop;
+          }
         }
       }
-    }
-    var item = data.items[name];
-    // Use text or image tag based on logo
-    if (item.hasOwnProperty('has_logo')) {
-      var has_logo = item.has_logo;
-    } else {
-      var has_logo = data.defaults.has_logo;
-    };
-    // Render differently for multi disc menus
-    if (data.hasOwnProperty('multi_name') && hasUsableValue(data.multi_name)) {
-      var romName = data.multi_name;
-    } else {
-      var romName = name;
-    };
-    if (has_logo == true) {
-      logo_html = '<img class="menu-img" alt="'+ romName +'" title="'+ romName +'">';
-    } else {
-      logo_html = '<p class="menu-img">' + name + '</p>';
-    };
-    // Set varibles to default if not set in item
-    var jsdata = '';
-    jsdata += 'data-name="' + romName + '" ';
-    for await (var key of defaultKeys) {
-      if (item.hasOwnProperty(key)) {
-        jsdata += 'data-' + key + '="' + item[key] + '" ';
+      var item = data.items[name];
+      // Use text or image tag based on logo
+      if (item.hasOwnProperty('has_logo')) {
+        var has_logo = item.has_logo;
       } else {
-        jsdata += 'data-' + key + '="' + data.defaults[key] + '" ';
+        var has_logo = data.defaults.has_logo;
       };
+      // Render differently for multi disc menus
+      if (data.hasOwnProperty('multi_name') && hasUsableValue(data.multi_name)) {
+        var romName = data.multi_name;
+      } else {
+        var romName = name;
+      };
+      if (has_logo == true) {
+        logo_html = '<img class="menu-img" alt="'+ romName +'" title="'+ romName +'">';
+      } else {
+        logo_html = '<p class="menu-img">' + name + '</p>';
+      };
+      // Set varibles to default if not set in item
+      var jsdata = '';
+      jsdata += 'data-name="' + romName + '" ';
+      jsdata += 'data-original-index="' + originalIndexByName[name] + '" ';
+      for (var key of defaultKeys) {
+        if (item.hasOwnProperty(key)) {
+          jsdata += 'data-' + key + '="' + item[key] + '" ';
+        } else {
+          jsdata += 'data-' + key + '="' + data.defaults[key] + '" ';
+        };
+      };
+      var itemType = item.hasOwnProperty('type') ? item.type : data.defaults.type;
+      var itemPath = item.hasOwnProperty('path') ? item.path : data.defaults.path;
+      var itemTitle = data.title || itemPath || 'Games';
+      var favoriteName = cleanGameName(romName, itemPath + '::' + name);
+      var favoriteId = itemPath + '::' + favoriteName;
+      var favoriteButton = '';
+      if (itemType == 'game') {
+        favoriteButton = '<button class="favorite-toggle" type="button" data-favorite-id="' + escapeHtml(favoriteId) + '" data-favorite-name="' + escapeHtml(favoriteName) + '" data-favorite-root="' + escapeHtml(root) + '" data-favorite-title="' + escapeHtml(itemTitle) + '" data-favorite-index="' + originalIndexByName[name] + '" onclick="toggleFavorite(event, this.getAttribute(\'data-favorite-id\'), this)" aria-label="Toggle favorite" title="Add to favorites">&hearts;</button>';
+      }
+      $('#games-list').append('\
+        <div id="m' + count + '">\
+          <div id="h' + count + '" class="menu-wrap ' + shrink + '">\
+            <a onclick="launch(\'' + count + '\')" id="i' + count + '" ' + jsdata + '>\
+              ' + logo_html + '\
+            </a>' + favoriteButton + '\
+          </div>\
+        </div>');
+      count++;
     };
-    var itemType = item.hasOwnProperty('type') ? item.type : data.defaults.type;
-    var itemPath = item.hasOwnProperty('path') ? item.path : data.defaults.path;
-    var itemTitle = data.title || itemPath || 'Games';
-    var favoriteName = cleanGameName(romName, itemPath + '::' + name);
-    var favoriteId = itemPath + '::' + favoriteName;
-    var favoriteButton = '';
-    if (itemType == 'game') {
-      favoriteButton = '<button class="favorite-toggle" type="button" data-favorite-id="' + escapeHtml(favoriteId) + '" data-favorite-name="' + escapeHtml(favoriteName) + '" data-favorite-root="' + escapeHtml(root) + '" data-favorite-title="' + escapeHtml(itemTitle) + '" data-favorite-index="' + count + '" onclick="toggleFavorite(event, this.getAttribute(\'data-favorite-id\'), this)" aria-label="Toggle favorite" title="Add to favorites">&hearts;</button>';
+    // Render active list
+    for (var active_num of [...Array(display_items).keys()]) {
+      $('#active-list').append('<div id="active' + active_num + '" class="menu-div"></div>');
     }
-    $('#games-list').append('\
-      <div id="m' + count + '">\
-        <div id="h' + count + '" class="menu-wrap ' + shrink + '">\
-          <a onclick="launch(\'' + count + '\')" id="i' + count + '" ' + jsdata + '>\
-            ' + logo_html + '\
-          </a>' + favoriteButton + '\
-        </div>\
-      </div>');
-    count++
-  };
-  // Render active list
-  for await (var active_num of [...Array(display_items).keys()]) {
-    $('#active-list').append('<div id="active' + active_num + '" class="menu-div"></div>');
+    // Render initial
+    if (portrait !== 0) {
+      $('.menu-img').css({'max-width': '30vw'});
+      $('.games-list').css({'width': '40vw'});
+      loadart(active_item);
+      loadvideo(active_item);
+    } else {
+      $('.menu-img').css({'max-width': '90vw'});
+      $('.games-list').css({'width': '100vw'});
+    }
+    var logo_load_start = active_item - Math.floor(display_items/2);
+    loadlogos(logo_load_start, display_items, items_length, active_item);
+    for (var favoriteId of getFavoriteIds()) {
+      setFavoriteButtonState(favoriteId);
+    }
+    $('.menu-div').css({'height': image_height});
+    $('.menu-img').css({'max-height': image_height});
+    highlight(active_item);
   }
-  // Render initial
-  if (portrait !== 0) {
-    $('.menu-img').css({'max-width': '30vw'});
-    $('.games-list').css({'width': '40vw'});
-    loadart(active_item);
-    loadvideo(active_item);
-  } else {
-    $('.menu-img').css({'max-width': '90vw'});
-    $('.games-list').css({'width': '100vw'});
-  }
-  loadlogos(logo_load_start, display_items, items_length, active_item);
-  for (var favoriteId of getFavoriteIds()) {
-    setFavoriteButtonState(favoriteId);
-  }
-  $('.menu-div').css({'height': image_height});
-  $('.menu-img').css({'max-height': image_height});
-  highlight(active_item);
+  $('#console-list-search').off('input.consoleFilter').on('input.consoleFilter', debounce(function() {
+    renderMenuItems(0);
+  }, 120));
+  renderMenuItems(Number(active_item));
   // Move items up
   function moveUp(num) {
+    if (items_length < 0) {
+      return;
+    }
     if (! isSafari) {
       $('#bgvid').prop('muted', false);
       $('#bgvid').prop('volume', 0.5);
@@ -1033,6 +1095,9 @@ async function rendermenu(datas) {
   };
   // Move items down
   function moveDown(num) {
+    if (items_length < 0) {
+      return;
+    }
     if (! isSafari) {
       $('#bgvid').prop('muted', false);
       $('#bgvid').prop('volume', 0.5);
@@ -1078,6 +1143,9 @@ async function rendermenu(datas) {
   let upPressed = false;
   let downPressed = false;
   $(document).keydown(function(event) {
+    if ($(event.target).is('input, select, textarea')) {
+      return;
+    }
     // Scroll on keypress
     if (event.key == 'ArrowDown') {
       downPressed = true;

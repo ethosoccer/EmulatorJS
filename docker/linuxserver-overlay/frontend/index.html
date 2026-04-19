@@ -6,12 +6,12 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="apple-touch-icon" href="icon.png" crossorigin="use-credentials">
     <link rel="manifest" href="manifest.json" crossorigin="use-credentials">
-    <link rel="stylesheet" href="css/index.css?v=20260419-admin-gate">
+    <link rel="stylesheet" href="css/index.css?v=20260419-console-filter">
     <script src="js/vendor/jquery.min.js"></script>
     <script src="js/vendor/hammer.min.js"></script>
     <script src="js/vendor/browserfs.min.js"></script>
     <script src="js/vendor/jszip.min.js"></script>
-    <script src="js/index.js?v=20260419-admin-gate"></script>
+    <script src="js/index.js?v=20260419-console-filter"></script>
   </head>
   <body>
     <div id="menu">
@@ -92,6 +92,11 @@
       <img id="background" class="background">
       <img id="corner" class="corner">
       <div class="page-container">
+        <div id="console-list-tools" class="console-list-tools hidden">
+          <input id="console-list-search" type="search" placeholder="Filter this console" autocomplete="off" aria-label="Filter games in this console">
+          <button id="console-list-clear" type="button" onclick="clearConsoleListFilter()">Clear</button>
+          <span id="console-list-status"></span>
+        </div>
         <div id="active-list" class="games-list"></div>
         <div class="artwork"></div>
       </div>

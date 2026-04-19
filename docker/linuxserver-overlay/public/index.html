@@ -10,9 +10,21 @@
         document.documentElement.setAttribute('data-theme', savedTheme || (prefersDark ? 'dark' : 'light'));
       }());
     </script>
-    <link rel="stylesheet" href="public/css/index.css?v=20260419-admin-refresh">
+    <link rel="stylesheet" href="public/css/index.css?v=20260419-admin-auth">
   </head>
-  <body>
+  <body class="admin-locked">
+    <div id="admin-login" class="admin-login">
+      <form id="admin-login-form" class="admin-login-card">
+        <h1>Admin Login</h1>
+        <p>Log in with an admin profile to manage ROMs, configs, files, profiles, and metadata.</p>
+        <label for="admin-login-user">Username</label>
+        <input id="admin-login-user" type="text" autocomplete="username" placeholder="user">
+        <label for="admin-login-pass">Password</label>
+        <input id="admin-login-pass" type="password" autocomplete="current-password" placeholder="pass">
+        <button class="button" type="submit">Login</button>
+        <div id="admin-login-status" class="admin-login-status"></div>
+      </form>
+    </div>
     <div id="top" class="top">
       <div id="nav" class="nav">
         <div onclick="renderRoms()" class="top-item">Rom Management</div>
@@ -24,6 +36,7 @@
       <div class="theme-actions">
         <button id="theme-toggle" class="button theme-toggle" type="button" aria-label="Toggle dark mode">Dark mode</button>
       </div>
+      <div id="admin-session" class="nav-buttons"></div>
       <div id="nav-buttons" class="nav-buttons"></div>
     </div>
     <div class="page-container">
@@ -197,6 +210,6 @@
     <script src="socket.io/socket.io.js"></script>
     <script src="public/js/vendor/jquery.min.js"></script>
     <script src="public/js/vendor/ace.js"></script>
-    <script src="public/js/index.js?v=20260419-admin-refresh"></script>
+    <script src="public/js/index.js?v=20260419-admin-auth"></script>
   </body>
 </html>

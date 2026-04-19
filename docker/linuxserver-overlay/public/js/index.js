@@ -3,6 +3,66 @@ var port = window.location.port;
 var protocol = window.location.protocol;
 var path = window.location.pathname;
 var socket = io(protocol + '//' + host + ':' + port, { path: path + 'socket.io'});
+var adminReady = false;
+
+function adminEndpoint(name) {
+  var basePath = path.endsWith('/') ? path : path + '/';
+  return basePath + name;
+}
+
+function setAdminStatus(message, isError) {
+  $('#admin-login-status').text(message || '').toggleClass('is-error', !!isError);
+}
+
+async function authenticateAdmin(user, pass, silent) {
+  if (!user || !pass) {
+    if (!silent) {
+      setAdminStatus('Enter an admin username and password.', true);
+    }
+    return;
+  }
+  setAdminStatus(silent ? 'Checking saved login...' : 'Logging in...');
+  try {
+    var response = await fetch(adminEndpoint('adminauth'), {
+      method: 'POST',
+      headers: {Accept: 'application/json', 'Content-Type': 'application/json'},
+      body: JSON.stringify({user: user, pass: pass})
+    });
+    var result = await response.json();
+    if (!response.ok || result.status !== 'success' || result.role !== 'admin') {
+      localStorage.removeItem('role');
+      if (!silent) {
+        setAdminStatus('Admin login required.', true);
+      } else {
+        setAdminStatus('');
+      }
+      return;
+    }
+    localStorage.setItem('user', user);
+    localStorage.setItem('pass', pass);
+    localStorage.setItem('role', result.role);
+    socket.emit('adminauth', {user: user, pass: pass});
+  } catch(e) {
+    console.log(e);
+    if (!silent) {
+      setAdminStatus('Unable to reach the admin login service.', true);
+    }
+  }
+}
+
+function adminLogout() {
+  adminReady = false;
+  fetch(adminEndpoint('adminlogout'), {method: 'POST'}).catch(function() {});
+  localStorage.removeItem('user');
+  localStorage.removeItem('pass');
+  localStorage.removeItem('role');
+  $('body').addClass('admin-locked');
+  $('#side').empty();
+  $('#main').empty();
+  $('#admin-session').empty();
+  $('#nav-buttons').empty();
+  setAdminStatus('Logged out.');
+}
 
 $(function() {
   var $toggle = $('#theme-toggle');
@@ -18,9 +78,28 @@ $(function() {
   $toggle.on('click', function() {
     setTheme($('html').attr('data-theme') === 'dark' ? 'light' : 'dark');
   });
+  $('#admin-login-form').on('submit', function(event) {
+    event.preventDefault();
+    authenticateAdmin($('#admin-login-user').val(), $('#admin-login-pass').val(), false);
+  });
+  $('#admin-login-user').val(localStorage.getItem('user') || '');
+  $('#admin-login-pass').val(localStorage.getItem('pass') || '');
+  authenticateAdmin(localStorage.getItem('user'), localStorage.getItem('pass'), true);
 });
 
 //// Socket recieves ////
+socket.on('adminauth', function(result) {
+  if (result.status === 'success' && result.role === 'admin') {
+    adminReady = true;
+    $('body').removeClass('admin-locked');
+    setAdminStatus('');
+    $('#admin-session').empty().append($('<span>').addClass('admin-user').text(result.user + ' (admin)'));
+    $('#admin-session').append($('<button>').addClass('button hover').attr('type', 'button').on('click', adminLogout).text('Logout'));
+  } else if (!adminReady) {
+    $('body').addClass('admin-locked');
+    setAdminStatus('Admin login required.', true);
+  }
+});
 // Render config
 socket.on('renderconfig', renderConfig);
 // Render rom

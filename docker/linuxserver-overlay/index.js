@@ -75,16 +75,101 @@ var emus = [
 var retroArchCfg = `
 input_menu_toggle_gamepad_combo = 3
 system_directory = /home/web_user/retroarch/system/`
+var adminSessions = new Map();
+
+function roleFor(profileRecord) {
+  if (profileRecord.role) {
+    return profileRecord.role;
+  }
+  if (profileRecord.username == 'eugene') {
+    return 'admin';
+  }
+  return 'user';
+}
+
+async function readProfiles() {
+  let profilesData = await fsw.readFile(home + '/profile/profile.json', 'utf8');
+  return JSON.parse(profilesData);
+}
+
+async function authenticateProfile(user, pass) {
+  if (!user || !pass) {
+    return null;
+  }
+  let hash = crypto.createHash('sha256').update(user + pass).digest('hex');
+  let profilesJson = await readProfiles();
+  if (!profilesJson.hasOwnProperty(hash)) {
+    return null;
+  }
+  return {
+    username: profilesJson[hash].username,
+    role: roleFor(profilesJson[hash])
+  };
+}
+
+function adminTokenFromRequest(req) {
+  let cookieHeader = req.headers.cookie || '';
+  let cookies = Object.fromEntries(cookieHeader.split(';').map(cookie => {
+    let parts = cookie.trim().split('=');
+    return [parts.shift(), parts.join('=')];
+  }).filter(cookie => cookie[0]));
+  return cookies.ejs_admin_session;
+}
+
+function isAdminSession(token) {
+  let session = token && adminSessions.get(token);
+  if (!session) {
+    return false;
+  }
+  if (Date.now() - session.created > 12 * 60 * 60 * 1000) {
+    adminSessions.delete(token);
+    return false;
+  }
+  return session.role === 'admin';
+}
+
+function requireAdminHttp(req, res, next) {
+  if (isAdminSession(adminTokenFromRequest(req))) {
+    next();
+    return;
+  }
+  res.status(403).send('Admin login required');
+}
 
 app.use(function(req, res, next) {
   res.header("Cross-Origin-Embedder-Policy", "require-corp");
   res.header("Cross-Origin-Opener-Policy", "same-origin");
   next();
 });
+app.use(express.json({ limit: '5mb' }));
 
 //// Http server ////
 baserouter.use('/public', express.static(__dirname + '/public'));
 baserouter.use('/frontend', express.static(__dirname + '/frontend'));
+baserouter.post('/adminauth', async function(req, res) {
+  try {
+    let profile = await authenticateProfile(req.body.user, req.body.pass);
+    if (!profile || profile.role !== 'admin') {
+      res.status(403).json({status: 'error'});
+      return;
+    }
+    let token = crypto.randomBytes(32).toString('hex');
+    adminSessions.set(token, {user: profile.username, role: profile.role, created: Date.now()});
+    res.setHeader('Set-Cookie', 'ejs_admin_session=' + token + '; Path=' + baseUrl + '; SameSite=Lax; HttpOnly');
+    res.json({status: 'success', user: profile.username, role: profile.role});
+  } catch(e) {
+    console.log(e);
+    res.status(500).json({status: 'error'});
+  }
+});
+baserouter.post('/adminlogout', function(req, res) {
+  let token = adminTokenFromRequest(req);
+  if (token) {
+    adminSessions.delete(token);
+  }
+  res.setHeader('Set-Cookie', 'ejs_admin_session=; Path=' + baseUrl + '; SameSite=Lax; HttpOnly; Max-Age=0');
+  res.json({status: 'success'});
+});
 baserouter.get("/", function (req, res) {
   res.sendFile(__dirname + '/public/index.html');
 });
@@ -94,6 +179,26 @@ http.listen(3000);
 //// socketIO comms ////
 io = socketIO(http, {path: baseUrl + 'socket.io',maxHttpBufferSize: 100000000});
 io.on('connection', async function (socket) {
+  socket.adminAuthenticated = false;
+
+  async function renderInitialAdminPage() {
+    if (fs.existsSync(dataRoot + 'config/main.json')) {
+      await renderRoms();
+    } else {
+      renderLanding();
+    };
+  }
+
+  function requireAdmin(handler) {
+    return async function(data) {
+      if (!socket.adminAuthenticated) {
+        socket.emit('adminauth', {status: 'error'});
+        return;
+      }
+      return await handler(data);
+    };
+  }
+
   //// Functions ////
   // Send config list to client
   async function renderConfigs() {
@@ -747,39 +852,48 @@ io.on('connection', async function (socket) {
   }
 
   // Incoming socket requests
-  socket.on('renderconfigs', renderConfigs);
-  socket.on('renderroms', renderRoms);
-  socket.on('renderromsdir', renderRomsDir);
-  socket.on('getconfig', getConfig);
-  socket.on('getmeta', getMetaJSON);
-  socket.on('getroms', getRoms);
-  socket.on('saveconfig', saveConfig);
-  socket.on('dldefaultfiles', dlDefaultFiles);
-  socket.on('scanroms', scanRoms);
-  socket.on('addtoconfig', addToConfig);
-  socket.on('purgenoart', purgeNoArt);
-  socket.on('downloadart', downloadArt);
-  socket.on('usermeta', userMeta);
-  socket.on('renderfiles', renderFiles);
-  socket.on('renderprofiles', renderProfiles);
-  socket.on('createprofile', createProfile);
-  socket.on('deleteprofile', deleteProfile);
-  socket.on('getromdata', getRomData);
-  socket.on('uploadart', uploadArt);
-  socket.on('updatevidposition', updateVidPosition);
-  socket.on('removemeta', removeMeta);
-  socket.on('custommeta', customMeta);
-  socket.on('rendermeta', renderMeta);
-  // Render landing page
-  if (fs.existsSync(dataRoot + 'config/main.json')) {
-    renderRoms();
-  } else {
-    renderLanding();
-  };
+  socket.on('adminauth', async function(data) {
+    try {
+      let profile = await authenticateProfile(data.user, data.pass);
+      if (!profile || profile.role !== 'admin') {
+        socket.emit('adminauth', {status: 'error'});
+        return;
+      }
+      socket.adminAuthenticated = true;
+      socket.emit('adminauth', {status: 'success', user: profile.username, role: profile.role});
+      await renderInitialAdminPage();
+    } catch(e) {
+      console.log(e);
+      socket.emit('adminauth', {status: 'error'});
+    }
+  });
+  socket.on('renderconfigs', requireAdmin(renderConfigs));
+  socket.on('renderroms', requireAdmin(renderRoms));
+  socket.on('renderromsdir', requireAdmin(renderRomsDir));
+  socket.on('getconfig', requireAdmin(getConfig));
+  socket.on('getmeta', requireAdmin(getMetaJSON));
+  socket.on('getroms', requireAdmin(getRoms));
+  socket.on('saveconfig', requireAdmin(saveConfig));
+  socket.on('dldefaultfiles', requireAdmin(dlDefaultFiles));
+  socket.on('scanroms', requireAdmin(scanRoms));
+  socket.on('addtoconfig', requireAdmin(addToConfig));
+  socket.on('purgenoart', requireAdmin(purgeNoArt));
+  socket.on('downloadart', requireAdmin(downloadArt));
+  socket.on('usermeta', requireAdmin(userMeta));
+  socket.on('renderfiles', requireAdmin(renderFiles));
+  socket.on('renderprofiles', requireAdmin(renderProfiles));
+  socket.on('createprofile', requireAdmin(createProfile));
+  socket.on('deleteprofile', requireAdmin(deleteProfile));
+  socket.on('getromdata', requireAdmin(getRomData));
+  socket.on('uploadart', requireAdmin(uploadArt));
+  socket.on('updatevidposition', requireAdmin(updateVidPosition));
+  socket.on('removemeta', requireAdmin(removeMeta));
+  socket.on('custommeta', requireAdmin(customMeta));
+  socket.on('rendermeta', requireAdmin(renderMeta));
 });
 
 // Cloudcmd File browser data
-baserouter.use('/files', cloudcmd({
+baserouter.use('/files', requireAdminHttp, cloudcmd({
   config: {
     root: dataRoot,
     prefix: baseUrl + 'files',
@@ -797,7 +911,7 @@ baserouter.use('/files', cloudcmd({
 }));
 
 // Cloudcmd File browser profile
-baserouter.use('/profile', cloudcmd({
+baserouter.use('/profile', requireAdminHttp, cloudcmd({
   config: {
     root: home + '/profile',
     prefix: baseUrl + 'profile',

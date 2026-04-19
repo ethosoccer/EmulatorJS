@@ -59,6 +59,58 @@ body {
   line-height: 1.45;
 }
 
+body.admin-locked .top,
+body.admin-locked .page-container,
+body.admin-locked #modal {
+  display: none;
+}
+
+.admin-login {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--bg);
+}
+
+body:not(.admin-locked) .admin-login {
+  display: none;
+}
+
+.admin-login-card {
+  width: min(420px, 100%);
+  display: grid;
+  gap: 12px;
+  padding: 28px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.admin-login-card h1,
+.admin-login-card p {
+  margin: 0;
+}
+
+.admin-login-card p,
+.admin-login-status {
+  color: var(--muted);
+}
+
+.admin-login-card label {
+  font-weight: 700;
+}
+
+.admin-login-card button {
+  margin-top: 4px;
+}
+
+.admin-login-status.is-error {
+  color: var(--danger);
+  font-weight: 700;
+}
+
 a {
   color: var(--accent-strong);
 }
@@ -128,6 +180,12 @@ button:focus-visible {
   align-items: center;
   gap: 8px;
   flex: 0 0 auto;
+}
+
+.admin-user {
+  color: var(--muted);
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 .top-item {

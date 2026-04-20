@@ -434,6 +434,11 @@ async function login() {
 
 async function forgotPassword(source) {
   let user = $('#user').val() || localStorage.getItem('user') || '';
+  if (!user) {
+    alert('Enter your username first.');
+    $('#user').trigger('focus');
+    return;
+  }
   let loginSettings = postSettings;
   loginSettings.body = JSON.stringify({type:'forgotpassword', user:user, source:source || 'filebrowser'});
   let res = await fetch(endPoint, loginSettings);

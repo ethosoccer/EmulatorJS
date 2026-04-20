@@ -146,6 +146,10 @@ app.post('/*', async function(req, res) {
       }
     } else {
       if (type == 'forgotpassword') {
+        if (!req.body.user) {
+          res.json(error);
+          return;
+        }
         let settings = await readSettings();
         if (!settings.passwordResetWebhook) {
           res.json(error);

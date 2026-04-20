@@ -64,6 +64,11 @@ async function authenticateAdmin(user, pass, silent) {
 
 async function forgotAdminPassword() {
   var user = $('#admin-login-user').val() || localStorage.getItem('user') || '';
+  if (!user) {
+    setAdminStatus('Enter your username first.', true);
+    $('#admin-login-user').trigger('focus');
+    return;
+  }
   setAdminStatus('Notifying admin...');
   try {
     var response = await fetch(adminEndpoint('profileapi'), {
@@ -155,6 +160,9 @@ socket.on('romdata', renderRomData);
 socket.on('rendermeta', renderMetaPage);
 // Render meta JSON
 socket.on('rendermetajson', renderMetaJSON);
+socket.on('scanflagcleared', function() {
+  $('.clear-scan-flag-button').prop('disabled', true).text('Rescan Queued');
+});
 
 //// Functions ////
 // Grab a json file from the server
@@ -252,6 +260,10 @@ function newScan(folder) {
 // Link metadata for selected rom
 function setMeta() {
   var linkHash = $('#gameselection').val();
+  if (!linkHash) {
+    alert('Choose a ROM metadata match first.');
+    return;
+  }
   var hash = $('#modal').data('hash');
   var dir = $('#main').data('name');
   closeModal();
@@ -516,8 +528,10 @@ async function renderRomData(data) {
   }
   let deleteButton = $('<button>').addClass('manage-button').text('Delete Everything');
   buttonWrapper.append(deleteButton.attr('onclick','unIdentify(true)'));
-  let rescanButton = $('<button>').addClass('manage-button').text('Clear Scan Flag');
-  buttonWrapper.append(rescanButton.attr('onclick','clearScanFlag()'));
+  if (data.scanFlag) {
+    let rescanButton = $('<button>').addClass('manage-button clear-scan-flag-button').text('Clear Scan Flag');
+    buttonWrapper.append(rescanButton.attr('onclick','clearScanFlag()'));
+  }
   manage.append(buttonWrapper);
   $('#modal-content').append(manage);
 }
@@ -537,24 +551,37 @@ async function identify() {
 
   var sel = $('<select>').attr('id', 'gameselection');
   var filter = $('<input>').attr({id: 'gameSelectionFilter', type: 'search', placeholder: 'Search metadata options'});
-  filter.on('input', function() {
-    var term = $(this).val().toLowerCase();
-    $('#gameselection option').each(function() {
-      $(this).toggle($(this).text().toLowerCase().indexOf(term) !== -1);
-    });
-  });
 
-  // Bump an exact match on the filename to the top of the list
-  var mostLikely = options.filter(opt => file.startsWith(opt.name))
-  for await (var option of mostLikely) {
-    sel.append($("<option>").attr('value',option.sha).text(option.name));
+  var sorted = options.sort((a,b) => (a.name > b.name) ? 1 : -1);
+  function optionRank(option) {
+    return file.startsWith(option.name) ? 0 : 1;
   }
-
-  var sorted = options.sort((a,b) => (a.name > b.name) ? 1 : -1)
-  for await (var option of sorted) {
-    sel.append($("<option>").attr('value',option.sha).text(option.name));
-  };
-  $('#rom-manage').append(filter, sel);
+  function renderGameSelection(term) {
+    var normalized = (term || '').toLowerCase().trim();
+    var filtered = sorted.filter(function(option) {
+      return !normalized || option.name.toLowerCase().indexOf(normalized) !== -1;
+    });
+    filtered.sort(function(a, b) {
+      var rank = optionRank(a) - optionRank(b);
+      if (rank !== 0) {
+        return rank;
+      }
+      return a.name.localeCompare(b.name);
+    });
+    sel.empty();
+    if (filtered.length === 0) {
+      sel.append($("<option>").attr('value','').text('No matches'));
+      return;
+    }
+    for (var option of filtered.slice(0, 300)) {
+      sel.append($("<option>").attr('value',option.sha).text(option.name));
+    }
+  }
+  filter.on('input', function() {
+    renderGameSelection($(this).val());
+  });
+  renderGameSelection('');
+  $('#rom-manage').append($('<div>').addClass('identify-combo').append(filter, sel));
   var setMetaButton = $('<button>').addClass('button hover').attr('onclick', 'setMeta()').text('Link Item');
   $('#rom-manage').append(setMetaButton);
   $('#rom-manage').append($('<h3>').text('Rom not found?:'));
@@ -585,10 +612,8 @@ function clearScanFlag() {
   }
   let dir = $('#main').data('name');
   let file = $('#modal').data('name');
-  closeModal();
-  $('#main').empty();
-  $('#main').append('<div class="loader"></div>');
   socket.emit('clearromscan', [dir, file]);
+  $('.clear-scan-flag-button').prop('disabled', true).text('Rescan Queued');
 }
 
 // Set custom metadata for a rom

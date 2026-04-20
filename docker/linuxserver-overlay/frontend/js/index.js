@@ -563,6 +563,11 @@ function setProfileStatus(message) {
 }
 async function forgotProfilePassword() {
   var user = $('#profile-user').val() || localStorage.getItem('user') || '';
+  if (!user) {
+    setProfileStatus('Enter your username first.');
+    $('#profile-user').trigger('focus');
+    return;
+  }
   setProfileStatus('Notifying admin...');
   try {
     var res = await profileRequest({type:'forgotpassword', user:user, source:'frontend'});
@@ -944,6 +949,17 @@ function toggleFavorite(event, favoriteId, button) {
   }
   queueProfilePush();
 }
+function downloadRom(event, button) {
+  event.preventDefault();
+  event.stopPropagation();
+  var url = 'user/' + button.getAttribute('data-rom-path') + '/roms/' + button.getAttribute('data-rom-name') + button.getAttribute('data-rom-extension');
+  var a = document.createElement('a');
+  a.href = encodeURI(url);
+  a.download = button.getAttribute('data-rom-name') + button.getAttribute('data-rom-extension');
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
 function openSearchPanel() {
   closeFavoritesPanel();
   closeSavePanel();
@@ -1241,17 +1257,10 @@ var loadart = debounce(function(active_item) {
 // Load logo list
 function loadlogos(logo_load_start, display_items, items_length, active_item) {
   for (var i = 0; i < display_items; i++) {
-    // Negative numbers
-    if (logo_load_start < 0) {
-      item_num = logo_load_start + items_length + 1;
-    // Positive numbers
-    } else {
-      if (logo_load_start > items_length){
-        item_num = logo_load_start - items_length - 1;
-      } else {
-        item_num = logo_load_start;
-      };
-    };
+    item_num = logo_load_start;
+    if (items_length >= 0) {
+      item_num = ((item_num % (items_length + 1)) + (items_length + 1)) % (items_length + 1);
+    }
     var has_logo = $('#i' + item_num.toString()).data('has_logo');
     var name = $('#i' + item_num.toString()).data('name');
     if (has_logo) {
@@ -1450,6 +1459,7 @@ async function rendermenu(datas) {
     var active_item = Math.floor(display_items/2);
   };
   var image_height = Math.floor(100/display_items).toString() + 'vh';
+  var visible_items = display_items;
   // Render zoom effect on active item
   function highlight(active_item) {
     if (portrait !== 0) {
@@ -1471,6 +1481,7 @@ async function rendermenu(datas) {
   };
   var jumpIndex = {};
   var letters = "abcdefghijklmnopqrstuvwxyz".split("");
+  var filteredNames = Object.keys(allItems);
   function renderConsoleFilterState(totalCount, filteredCount, query) {
     var showFilter = root !== 'main' && !(data.hasOwnProperty('multi_name') && hasUsableValue(data.multi_name));
     $('#console-list-tools').toggleClass('hidden', !showFilter);
@@ -1486,10 +1497,88 @@ async function rendermenu(datas) {
       $('#console-list-status').text(totalCount + ' games');
     }
   }
+  function buildMenuEntry(name, count) {
+    var item = data.items[name];
+    // Use text or image tag based on logo
+    if (item.hasOwnProperty('has_logo')) {
+      var has_logo = item.has_logo;
+    } else {
+      var has_logo = data.defaults.has_logo;
+    };
+    // Render differently for multi disc menus
+    if (data.hasOwnProperty('multi_name') && hasUsableValue(data.multi_name)) {
+      var romName = data.multi_name;
+    } else {
+      var romName = name;
+    };
+    if (has_logo == true) {
+      var logo_html = '<img class="menu-img" alt="'+ romName +'" title="'+ romName +'">';
+    } else {
+      var logo_html = '<p class="menu-img">' + name + '</p>';
+    };
+    // Set varibles to default if not set in item
+    var jsdata = '';
+    jsdata += 'data-name="' + romName + '" ';
+    jsdata += 'data-original-index="' + originalIndexByName[name] + '" ';
+    for (var key of defaultKeys) {
+      if (item.hasOwnProperty(key)) {
+        jsdata += 'data-' + key + '="' + item[key] + '" ';
+      } else {
+        jsdata += 'data-' + key + '="' + data.defaults[key] + '" ';
+      };
+    };
+    var itemType = item.hasOwnProperty('type') ? item.type : data.defaults.type;
+    var itemPath = item.hasOwnProperty('path') ? item.path : data.defaults.path;
+    var itemTitle = data.title || itemPath || 'Games';
+    var favoriteName = cleanGameName(romName, itemPath + '::' + name);
+    var favoriteId = itemPath + '::' + favoriteName;
+    var saveBase = saveBasename(romName + (item.hasOwnProperty('rom_extension') ? item.rom_extension : data.defaults.rom_extension || ''));
+    var favoriteButton = '';
+    var saveButton = '';
+    var romDownloadButton = '';
+    if (itemType == 'game') {
+      saveButton = '<button class="save-toggle hidden" type="button" data-save-base="' + escapeHtml(saveBase) + '" data-save-name="' + escapeHtml(favoriteName) + '" onclick="openGameSaves(event, this.getAttribute(\'data-save-name\'), this.getAttribute(\'data-save-base\'))" aria-label="Download saves" title="No local saves found">&#128190;</button>';
+      romDownloadButton = '<button class="rom-download-toggle" type="button" data-rom-path="' + escapeHtml(itemPath) + '" data-rom-name="' + escapeHtml(romName) + '" data-rom-extension="' + escapeHtml(item.hasOwnProperty('rom_extension') ? item.rom_extension : data.defaults.rom_extension || '') + '" onclick="downloadRom(event, this)" aria-label="Download ROM" title="Download ROM">&#10515;</button>';
+      favoriteButton = '<button class="favorite-toggle" type="button" data-favorite-id="' + escapeHtml(favoriteId) + '" data-favorite-name="' + escapeHtml(favoriteName) + '" data-favorite-root="' + escapeHtml(root) + '" data-favorite-title="' + escapeHtml(itemTitle) + '" data-favorite-index="' + originalIndexByName[name] + '" onclick="toggleFavorite(event, this.getAttribute(\'data-favorite-id\'), this)" aria-label="Toggle favorite" title="Add to favorites">&hearts;</button>';
+    }
+    return '\
+      <div id="m' + count + '">\
+        <div id="h' + count + '" class="menu-wrap ' + shrink + '">\
+          <a onclick="launch(this)" id="i' + count + '" ' + jsdata + '>\
+            ' + logo_html + '\
+          </a>' + saveButton + romDownloadButton + favoriteButton + '\
+        </div>\
+      </div>';
+  }
+  function renderVisibleEntries() {
+    $('#games-list').empty();
+    var logo_load_start = active_item - Math.floor(visible_items/2);
+    var rendered = {};
+    for (var slot = 0; slot < visible_items; slot++) {
+      var itemIndex = logo_load_start + slot;
+      if (items_length >= 0) {
+        itemIndex = ((itemIndex % (items_length + 1)) + (items_length + 1)) % (items_length + 1);
+      }
+      if (itemIndex >= 0 && itemIndex <= items_length && filteredNames[itemIndex] && !rendered[itemIndex]) {
+        rendered[itemIndex] = true;
+        $('#games-list').append(buildMenuEntry(filteredNames[itemIndex], itemIndex));
+      }
+    }
+    for (var favoriteId of getFavoriteIds()) {
+      setFavoriteButtonState(favoriteId);
+    }
+    refreshSaveIndicators();
+    $('.menu-img').css({'max-height': image_height});
+    if (portrait !== 0) {
+      $('.menu-img').css({'max-width': '30vw'});
+    } else {
+      $('.menu-img').css({'max-width': '90vw'});
+    }
+  }
   function renderMenuItems(nextActiveItem) {
     var showFilter = root !== 'main' && !(data.hasOwnProperty('multi_name') && hasUsableValue(data.multi_name));
     var query = showFilter ? ($('#console-list-search').val() || '').toLowerCase().trim() : '';
-    var filteredNames = Object.keys(allItems).filter(function(name) {
+    filteredNames = Object.keys(allItems).filter(function(name) {
       return !query || name.toLowerCase().indexOf(query) !== -1;
     });
     items = {};
@@ -1498,6 +1587,7 @@ async function rendermenu(datas) {
     }
     data.items = items;
     items_length = filteredNames.length - 1;
+    visible_items = Math.min(display_items, filteredNames.length);
     jumpIndex = {};
     $('#games-list').empty();
     $('#active-list').empty();
@@ -1529,61 +1619,13 @@ async function rendermenu(datas) {
           }
         }
       }
-      var item = data.items[name];
-      // Use text or image tag based on logo
-      if (item.hasOwnProperty('has_logo')) {
-        var has_logo = item.has_logo;
-      } else {
-        var has_logo = data.defaults.has_logo;
-      };
-      // Render differently for multi disc menus
-      if (data.hasOwnProperty('multi_name') && hasUsableValue(data.multi_name)) {
-        var romName = data.multi_name;
-      } else {
-        var romName = name;
-      };
-      if (has_logo == true) {
-        logo_html = '<img class="menu-img" alt="'+ romName +'" title="'+ romName +'">';
-      } else {
-        logo_html = '<p class="menu-img">' + name + '</p>';
-      };
-      // Set varibles to default if not set in item
-      var jsdata = '';
-      jsdata += 'data-name="' + romName + '" ';
-      jsdata += 'data-original-index="' + originalIndexByName[name] + '" ';
-      for (var key of defaultKeys) {
-        if (item.hasOwnProperty(key)) {
-          jsdata += 'data-' + key + '="' + item[key] + '" ';
-        } else {
-          jsdata += 'data-' + key + '="' + data.defaults[key] + '" ';
-        };
-      };
-      var itemType = item.hasOwnProperty('type') ? item.type : data.defaults.type;
-      var itemPath = item.hasOwnProperty('path') ? item.path : data.defaults.path;
-      var itemTitle = data.title || itemPath || 'Games';
-      var favoriteName = cleanGameName(romName, itemPath + '::' + name);
-      var favoriteId = itemPath + '::' + favoriteName;
-      var saveBase = saveBasename(romName + (item.hasOwnProperty('rom_extension') ? item.rom_extension : data.defaults.rom_extension || ''));
-      var favoriteButton = '';
-      var saveButton = '';
-      if (itemType == 'game') {
-        saveButton = '<button class="save-toggle hidden" type="button" data-save-base="' + escapeHtml(saveBase) + '" data-save-name="' + escapeHtml(favoriteName) + '" onclick="openGameSaves(event, this.getAttribute(\'data-save-name\'), this.getAttribute(\'data-save-base\'))" aria-label="Download saves" title="No local saves found">&#128190;</button>';
-        favoriteButton = '<button class="favorite-toggle" type="button" data-favorite-id="' + escapeHtml(favoriteId) + '" data-favorite-name="' + escapeHtml(favoriteName) + '" data-favorite-root="' + escapeHtml(root) + '" data-favorite-title="' + escapeHtml(itemTitle) + '" data-favorite-index="' + originalIndexByName[name] + '" onclick="toggleFavorite(event, this.getAttribute(\'data-favorite-id\'), this)" aria-label="Toggle favorite" title="Add to favorites">&hearts;</button>';
-      }
-      $('#games-list').append('\
-        <div id="m' + count + '">\
-          <div id="h' + count + '" class="menu-wrap ' + shrink + '">\
-            <a onclick="launch(this)" id="i' + count + '" ' + jsdata + '>\
-              ' + logo_html + '\
-            </a>' + saveButton + favoriteButton + '\
-          </div>\
-        </div>');
       count++;
     };
     // Render active list
-    for (var active_num of [...Array(display_items).keys()]) {
+    for (var active_num of [...Array(visible_items).keys()]) {
       $('#active-list').append('<div id="active' + active_num + '" class="menu-div"></div>');
     }
+    renderVisibleEntries();
     // Render initial
     if (portrait !== 0) {
       $('.menu-img').css({'max-width': '30vw'});
@@ -1594,12 +1636,8 @@ async function rendermenu(datas) {
       $('.menu-img').css({'max-width': '90vw'});
       $('.games-list').css({'width': '100vw'});
     }
-    var logo_load_start = active_item - Math.floor(display_items/2);
-    loadlogos(logo_load_start, display_items, items_length, active_item);
-    for (var favoriteId of getFavoriteIds()) {
-      setFavoriteButtonState(favoriteId);
-    }
-    refreshSaveIndicators();
+    var logo_load_start = active_item - Math.floor(visible_items/2);
+    loadlogos(logo_load_start, visible_items, items_length, active_item);
     $('.menu-div').css({'height': image_height});
     $('.menu-img').css({'max-height': image_height});
     highlight(active_item);
@@ -1625,8 +1663,9 @@ async function rendermenu(datas) {
     if (active_item < 0) {
       active_item = items_length;
     }
-    var logo_load_start = active_item - Math.floor(display_items/2);
-    loadlogos(logo_load_start, display_items, items_length, active_item);
+    var logo_load_start = active_item - Math.floor(visible_items/2);
+    renderVisibleEntries();
+    loadlogos(logo_load_start, visible_items, items_length, active_item);
     // Background art and video
     if (portrait !== 0) {
       loadart(active_item);
@@ -1651,8 +1690,9 @@ async function rendermenu(datas) {
     if (active_item > items_length) {
       active_item = 0;
     }
-    var logo_load_start = active_item - Math.floor(display_items/2);
-    loadlogos(logo_load_start, display_items, items_length, active_item);
+    var logo_load_start = active_item - Math.floor(visible_items/2);
+    renderVisibleEntries();
+    loadlogos(logo_load_start, visible_items, items_length, active_item);
     // Background art and video
     if (portrait !== 0) {
       loadart(active_item);

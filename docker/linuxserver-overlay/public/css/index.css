@@ -308,13 +308,20 @@ button:focus-visible {
   font-weight: 700;
 }
 
-#gameSelectionFilter {
-  width: min(420px, 100%);
-  margin-right: 8px;
+.identify-combo {
+  display: grid;
+  gap: 8px;
+  width: min(680px, 100%);
+}
+
+#gameSelectionFilter,
+#gameselection {
+  width: 100%;
+  margin: 0;
 }
 
 #gameselection {
-  width: min(680px, 100%);
+  min-height: 44px;
 }
 
 .hidden {

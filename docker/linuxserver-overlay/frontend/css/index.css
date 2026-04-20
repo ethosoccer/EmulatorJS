@@ -447,7 +447,8 @@ body.profile-required .profile-login-copy {
   min-width: 42px;
 }
 
-.favorite-toggle {
+.favorite-toggle,
+.rom-download-toggle {
   position: absolute;
   right: 0;
   top: 50%;
@@ -464,9 +465,13 @@ body.profile-required .profile-login-copy {
   line-height: 1;
 }
 
+.rom-download-toggle {
+  right: 42px;
+}
+
 .save-toggle {
   position: absolute;
-  right: 42px;
+  right: 84px;
   top: 50%;
   z-index: 2;
   width: 34px;
@@ -503,7 +508,7 @@ body.profile-required .profile-login-copy {
 
 .menu-wrap a {
   display: inline-block;
-  padding-right: 84px;
+  padding-right: 126px;
 }
 
 .profile-tabs {

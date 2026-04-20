@@ -78,6 +78,32 @@ input_menu_toggle_gamepad_combo = 3
 system_directory = /home/web_user/retroarch/system/`
 var adminSessions = new Map();
 
+function rescanFlagPath(dir, file) {
+  return hashPath + dir + '/rescan/' + encodeURIComponent(file) + '.rescan';
+}
+
+async function applyPendingRescans(dir) {
+  let rescanDir = hashPath + dir + '/rescan/';
+  if (!fs.existsSync(rescanDir)) {
+    return 0;
+  }
+  let flags = await fsw.readdir(rescanDir);
+  let count = 0;
+  for await (let flag of flags) {
+    if (!flag.endsWith('.rescan')) {
+      continue;
+    }
+    let file = decodeURIComponent(flag.replace(/\.rescan$/, ''));
+    let shaFile = hashPath + dir + '/roms/' + file + '.sha1';
+    if (fs.existsSync(shaFile)) {
+      fs.unlinkSync(shaFile);
+      count++;
+    }
+    await fsw.rm(rescanDir + flag, {force: true});
+  }
+  return count;
+}
+
 function normalizeRomName(value) {
   return String(value || '')
     .replace(/\.[^.]+$/, '')
@@ -485,11 +511,15 @@ io.on('connection', async function (socket) {
   };
 
   // Scan roms directory using helper script
-  function scanRoms(data) {
+  async function scanRoms(data) {
     let folder = data[0];
     let fullScan = data[1];
     let preferredRegion = data[2] || '';
     socket.emit('emptymodal');
+    let pendingRescans = await applyPendingRescans(folder);
+    if (pendingRescans > 0) {
+      socket.emit('modaldata', 'Queued rescan for ' + pendingRescans + ' item(s).');
+    }
     let scanProcess = spawn('./has_files.sh', ['/' + folder + '/roms/', folder, fullScan]);
     scanProcess.stdout.setEncoding('utf8');
     scanProcess.stderr.setEncoding('utf8');
@@ -730,10 +760,13 @@ io.on('connection', async function (socket) {
     let dir = data[0];
     let file = data[1];
     let shaFile = hashPath + dir + '/roms/' + file + '.sha1';
-    if (fs.existsSync(shaFile)) {
-      fs.unlinkSync(shaFile);
+    if (!fs.existsSync(shaFile)) {
+      socket.emit('modaldata', 'No scan flag exists for ' + file);
+      return;
     }
-    getRoms(dir);
+    await fsw.mkdir(hashPath + dir + '/rescan/', {recursive: true});
+    await fsw.writeFile(rescanFlagPath(dir, file), '');
+    socket.emit('scanflagcleared', {dir: dir, file: file});
   }
 
   // Get combined metadata
@@ -833,7 +866,9 @@ io.on('connection', async function (socket) {
     // Assemble metdata for client
     let romData = {};
     romData.file = file;
-    let hash = await fsw.readFile(hashPath + dir + '/roms/' + file + '.sha1', 'utf8');
+    let shaFile = hashPath + dir + '/roms/' + file + '.sha1';
+    romData.scanFlag = fs.existsSync(shaFile);
+    let hash = await fsw.readFile(shaFile, 'utf8');
     romData.hash = hash;
     let metaData = await getMeta(dir);
     if (metaData.hasOwnProperty(hash)) {

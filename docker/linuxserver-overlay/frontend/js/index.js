@@ -561,6 +561,42 @@ function showProfileTab(tab) {
 function setProfileStatus(message) {
   $('#profile-status').text(message || '');
 }
+async function forgotProfilePassword() {
+  var user = $('#profile-user').val() || localStorage.getItem('user') || '';
+  setProfileStatus('Notifying admin...');
+  try {
+    var res = await profileRequest({type:'forgotpassword', user:user, source:'frontend'});
+    var json = await res.json();
+    setProfileStatus(json.status == 'success' ? 'The admin has been notified.' : 'Password reset notification is not configured.');
+  } catch(e) {
+    console.log(e);
+    setProfileStatus('Unable to notify admin.');
+  }
+}
+async function changeProfilePassword() {
+  var oldPass = $('#profile-old-pass').val();
+  var newPass = $('#profile-new-pass').val();
+  if (!newPass) {
+    setProfileStatus('Enter a new password.');
+    return;
+  }
+  setProfileStatus('Updating password...');
+  try {
+    var res = await profileRequest(profileRequestBody('changepassword', {oldPass: oldPass, newPass: newPass}));
+    var json = await res.json();
+    if (json.status == 'success') {
+      localStorage.setItem('pass', newPass);
+      $('#profile-old-pass').val('');
+      $('#profile-new-pass').val('');
+      setProfileStatus('Password updated.');
+    } else {
+      setProfileStatus('Password update failed.');
+    }
+  } catch(e) {
+    console.log(e);
+    setProfileStatus('Password update failed.');
+  }
+}
 function updateLoginState() {
   var user = localStorage.getItem('user');
   var role = localStorage.getItem('role') || 'user';
@@ -1166,24 +1202,22 @@ function updateConsoleBackButton(root, data) {
 var loadvideo = debounce(function(active_item) {
   var name = $('#i' + active_item.toString()).data('name');
   var has_video = $('#i' + active_item.toString()).data('has_video');
+  var video_position = $('#i' + active_item.toString()).data('video_position');
+  var video_src;
   if (has_video) {
-    var video_position = $('#i' + active_item.toString()).data('video_position');
     var video_path = 'user/' + $('#i' + active_item.toString()).data('path') + '/videos/';
-    var video_src = video_path + name + '.mp4';
-    // Set video position
-    $('#bgvid').attr('style', 'position:fixed;object-fit:fill;' + video_position);
-    // Stop old video if exists and load new
-    var oldvid = $('#vid').attr('src');
-    if (typeof oldvid !== 'undefined' && oldvid !== false) {
-      $('#bgvid').trigger('pause');
-    }
-    $('#vid').attr('src', video_src);
-    $('#bgvid').trigger('load');
-    $('#bgvid').trigger('play');
+    video_src = video_path + name + '.mp4';
   } else {
-    $('#vid').attr('src', '');
-    $('#bgvid').trigger('load');
+    video_src = 'user/main/videos/default.mp4';
   }
+  $('#bgvid').attr('style', 'position:fixed;object-fit:fill;' + (video_position || ''));
+  var oldvid = $('#vid').attr('src');
+  if (typeof oldvid !== 'undefined' && oldvid !== false) {
+    $('#bgvid').trigger('pause');
+  }
+  $('#vid').attr('src', video_src);
+  $('#bgvid').trigger('load');
+  $('#bgvid').trigger('play');
 }, 200);
 // Apply background art
 var loadart = debounce(function(active_item) {

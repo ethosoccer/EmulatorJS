@@ -516,6 +516,19 @@ body.profile-required .profile-login-copy {
   margin: 4px 0 10px;
 }
 
+.profile-password-panel {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, .18);
+}
+
+.profile-password-panel h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
 .profile-tabs button.is-active {
   border-color: rgba(143, 214, 255, .75);
   background: rgba(143, 214, 255, .18);

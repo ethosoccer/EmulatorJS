@@ -432,6 +432,15 @@ async function login() {
   }
 }
 
+async function forgotPassword(source) {
+  let user = $('#user').val() || localStorage.getItem('user') || '';
+  let loginSettings = postSettings;
+  loginSettings.body = JSON.stringify({type:'forgotpassword', user:user, source:source || 'filebrowser'});
+  let res = await fetch(endPoint, loginSettings);
+  let json = await res.json();
+  alert(json.status == 'success' ? 'The admin has been notified.' : 'Password reset notification is not configured.');
+}
+
 // Logout
 function logout() {
   localStorage.removeItem('user');
@@ -500,7 +509,7 @@ async function loadUsers() {
   }
   let table = $('<table>').addClass('fileTable');
   let header = $('<tr>');
-  for await (let name of ['Username', 'Role', 'Action']) {
+  for await (let name of ['Username', 'Role', 'Password', 'Action']) {
     header.append($('<th>').text(name));
   }
   table.append(header);
@@ -510,7 +519,12 @@ async function loadUsers() {
     let save = $('<button>').text('Save Role').on('click', async function() {
       await setUserRole(user.username, roleSelect.val());
     });
-    row.append($('<td>').text(user.username), $('<td>').append(roleSelect), $('<td>').append(save));
+    let passInput = $('<input>').attr({type:'password', placeholder:'New password'});
+    let passButton = $('<button>').text('Update Password').on('click', async function() {
+      await adminChangePassword(user.username, passInput.val());
+      passInput.val('');
+    });
+    row.append($('<td>').text(user.username), $('<td>').append(roleSelect), $('<td>').append(passInput, passButton), $('<td>').append(save));
     table.append(row);
   }
   $('#usersList').append(table);
@@ -544,6 +558,18 @@ async function createManagedUser() {
   }
 }
 
+async function adminChangePassword(target, newPass) {
+  if (!newPass) {
+    alert('Enter a new password');
+    return;
+  }
+  let loginSettings = postSettings;
+  loginSettings.body = JSON.stringify(adminProfileBody('adminchangepassword', {target: target, newPass: newPass}));
+  let res = await fetch(endPoint, loginSettings);
+  let json = await res.json();
+  alert(json.status == 'success' ? 'Password updated' : 'Unable to update password');
+}
+
 function showUserManagement() {
   if (localStorage.getItem('role') !== 'admin') {
     return;
@@ -575,15 +601,28 @@ async function loadAdminSettings() {
   let json = await res.json();
   if (json.status == 'success') {
     $('#requireMainLogin').prop('checked', json.requireLogin === true);
+    $('#passwordResetWebhook').val(json.passwordResetWebhook || '');
   }
 }
 
 async function saveAdminSettings() {
   let loginSettings = postSettings;
-  loginSettings.body = JSON.stringify(adminProfileBody('setsettings', {requireLogin: $('#requireMainLogin').prop('checked')}));
+  loginSettings.body = JSON.stringify(adminProfileBody('setsettings', {
+    requireLogin: $('#requireMainLogin').prop('checked'),
+    passwordResetWebhook: $('#passwordResetWebhook').val()
+  }));
   let res = await fetch(endPoint, loginSettings);
   let json = await res.json();
   alert(json.status == 'success' ? 'Settings saved' : 'Unable to save settings');
+}
+
+async function testPasswordResetWebhook() {
+  await saveAdminSettings();
+  let loginSettings = postSettings;
+  loginSettings.body = JSON.stringify(adminProfileBody('testpasswordresetwebhook'));
+  let res = await fetch(endPoint, loginSettings);
+  let json = await res.json();
+  alert(json.status == 'success' ? 'Test payload sent' : 'Unable to send test payload');
 }
 
 // Pull profile from server

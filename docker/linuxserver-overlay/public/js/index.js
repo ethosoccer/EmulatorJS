@@ -10,6 +10,18 @@ function adminEndpoint(name) {
   return basePath + name;
 }
 
+function preferredRegionKey(folder) {
+  return 'ejs-scan-region-' + folder;
+}
+
+function getPreferredRegion(folder) {
+  return localStorage.getItem(preferredRegionKey(folder)) || '';
+}
+
+function setPreferredRegion(folder, value) {
+  localStorage.setItem(preferredRegionKey(folder), value || '');
+}
+
 function setAdminStatus(message, isError) {
   $('#admin-login-status').text(message || '').toggleClass('is-error', !!isError);
 }
@@ -47,6 +59,23 @@ async function authenticateAdmin(user, pass, silent) {
     if (!silent) {
       setAdminStatus('Unable to reach the admin login service.', true);
     }
+  }
+}
+
+async function forgotAdminPassword() {
+  var user = $('#admin-login-user').val() || localStorage.getItem('user') || '';
+  setAdminStatus('Notifying admin...');
+  try {
+    var response = await fetch(adminEndpoint('profileapi'), {
+      method: 'POST',
+      headers: {Accept: 'application/json', 'Content-Type': 'application/json'},
+      body: JSON.stringify({type:'forgotpassword', user:user, source:'admin-manager'})
+    });
+    var result = await response.json();
+    setAdminStatus(result.status === 'success' ? 'The admin has been notified.' : 'Password reset notification is not configured.', result.status !== 'success');
+  } catch(e) {
+    console.log(e);
+    setAdminStatus('Unable to notify admin.', true);
   }
 }
 
@@ -206,13 +235,17 @@ function renderRoms() {
 
 // Scan in a roms directory
 function scanRoms(folder) {
-  socket.emit('scanroms', [folder, true]);
+  socket.emit('scanroms', [folder, true, getPreferredRegion(folder)]);
   $('#modal').toggle(100);
 }
 
 // Scan in a roms directory
 function newScan(folder) {
-  socket.emit('scanroms', [folder, false]);
+  var choice = prompt('Type "all" to scan all items, or press OK/Enter to scan only new items.', 'new');
+  if (choice === null) {
+    return;
+  }
+  socket.emit('scanroms', [folder, choice.toLowerCase() === 'all', getPreferredRegion(folder)]);
   $('#modal').toggle(100);
 }
 
@@ -291,6 +324,9 @@ async function saveConfig() {
 
 // Save romlist to config file
 function addToConfig(name) {
+  if (!confirm('Add all identified ROMs to the ' + name + ' config? This will rewrite the generated items list.')) {
+    return;
+  }
   $('#main').empty();
   $('#main').append('<div class="loader"></div>'); 
   socket.emit('addtoconfig', name);
@@ -369,6 +405,17 @@ async function renderRom(data) {
   container.append(identified,unidentified);
   // Process buttons
   let folderName = $('#main').data('name');
+  let regionControls = $('<div>').addClass('scan-region-controls');
+  let regionSelect = $('<select>').attr('id', 'preferredScanRegion');
+  for (let region of ['', 'USA', 'Europe', 'Japan', 'World']) {
+    regionSelect.append($('<option>').attr('value', region).text(region || 'No preferred scan region'));
+  }
+  regionSelect.val(getPreferredRegion(folderName));
+  regionSelect.on('change', function() {
+    setPreferredRegion(folderName, $(this).val());
+  });
+  regionControls.append($('<label>').attr('for', 'preferredScanRegion').text('Preferred scan region'), regionSelect);
+  $('#side').append(regionControls);
   let downloadArtButton = $('<button>').addClass('button hover').attr('onclick', 'downloadArt(\'' + folderName + '\');').text('Download All Available Art');
   $('#side').append($('<p>').text('Step 1:'));
   $('#side').append(downloadArtButton);
@@ -469,6 +516,8 @@ async function renderRomData(data) {
   }
   let deleteButton = $('<button>').addClass('manage-button').text('Delete Everything');
   buttonWrapper.append(deleteButton.attr('onclick','unIdentify(true)'));
+  let rescanButton = $('<button>').addClass('manage-button').text('Clear Scan Flag');
+  buttonWrapper.append(rescanButton.attr('onclick','clearScanFlag()'));
   manage.append(buttonWrapper);
   $('#modal-content').append(manage);
 }
@@ -487,6 +536,13 @@ async function identify() {
   };
 
   var sel = $('<select>').attr('id', 'gameselection');
+  var filter = $('<input>').attr({id: 'gameSelectionFilter', type: 'search', placeholder: 'Search metadata options'});
+  filter.on('input', function() {
+    var term = $(this).val().toLowerCase();
+    $('#gameselection option').each(function() {
+      $(this).toggle($(this).text().toLowerCase().indexOf(term) !== -1);
+    });
+  });
 
   // Bump an exact match on the filename to the top of the list
   var mostLikely = options.filter(opt => file.startsWith(opt.name))
@@ -498,7 +554,7 @@ async function identify() {
   for await (var option of sorted) {
     sel.append($("<option>").attr('value',option.sha).text(option.name));
   };
-  $('#rom-manage').append(sel);
+  $('#rom-manage').append(filter, sel);
   var setMetaButton = $('<button>').addClass('button hover').attr('onclick', 'setMeta()').text('Link Item');
   $('#rom-manage').append(setMetaButton);
   $('#rom-manage').append($('<h3>').text('Rom not found?:'));
@@ -511,6 +567,9 @@ async function identify() {
 
 // Remove identified roms link if it exists
 function unIdentify(purge) {
+  if (purge && !confirm('Delete this ROM, hash, and any downloaded art? This cannot be undone.')) {
+    return;
+  }
   let hash = $('#modal').data('hash');
   let dir = $('#main').data('name');
   let file = $('#modal').data('name');
@@ -518,6 +577,18 @@ function unIdentify(purge) {
   $('#main').empty();
   $('#main').append('<div class="loader"></div>');
   socket.emit('removemeta', [hash, dir, file, purge]); 
+}
+
+function clearScanFlag() {
+  if (!confirm('Clear this ROM scan flag? It will be rescanned the next time you scan only new items.')) {
+    return;
+  }
+  let dir = $('#main').data('name');
+  let file = $('#modal').data('name');
+  closeModal();
+  $('#main').empty();
+  $('#main').append('<div class="loader"></div>');
+  socket.emit('clearromscan', [dir, file]);
 }
 
 // Set custom metadata for a rom

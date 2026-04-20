@@ -9,13 +9,13 @@
         document.documentElement.setAttribute('data-theme', savedTheme || (prefersDark ? 'dark' : 'light'));
       }());
     </script>
-    <link rel="stylesheet" href="css/filebrowser.css?v=20260419-delete-align">
+    <link rel="stylesheet" href="css/filebrowser.css?v=20260420-account-video">
     <link rel="stylesheet" href="css/vendor/jquery.modal.min.css">
     <script type="text/javascript" src="js/vendor/jquery.min.js"></script>
     <script type="text/javascript" src="js/vendor/jquery.modal.min.js"></script>
     <script type="text/javascript" src="js/vendor/browserfs.min.js"></script>
     <script type="text/javascript" src="js/vendor/jszip.min.js"></script>
-    <script type="text/javascript" src="js/filebrowser.js?v=20260419-user-modal"></script>
+    <script type="text/javascript" src="js/filebrowser.js?v=20260420-account-video"></script>
   </head>
   <body>
   <div id="popup" class="modal">
@@ -28,6 +28,7 @@
         <input id="user" type="text" placeholder="user"></input>
         <input id="pass" type="password" placeholder="pass"></input>
         <button id="login" onclick="login()">Login</button>
+        <button id="forgotPassword" onclick="forgotPassword('filebrowser')">Forgot password</button>
       </span>
       <button id="logout" class="hidden" onclick="logout()">Logout</button>
       <span id="syncButtons" class="hidden">
@@ -98,6 +99,8 @@
           Require login before showing the main game browser
         </label>
         <button type="button" onclick="saveAdminSettings()">Save Settings</button>
+        <input id="passwordResetWebhook" type="url" placeholder="Password reset webhook URL">
+        <button type="button" onclick="testPasswordResetWebhook()">Test Payload</button>
       </div>
       <div id="usersList" class="modal-table-wrap"></div>
     </div>

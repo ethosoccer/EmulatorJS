@@ -8,6 +8,7 @@ var path = require('path');
 var cloudcmd = require('cloudcmd');
 var express = require('express');
 var app = require('express')();
+var httpModule = require('http');
 var http = require('http').Server(app);
 var baserouter = express.Router();
 var { spawn } = require('child_process');
@@ -76,6 +77,67 @@ var retroArchCfg = `
 input_menu_toggle_gamepad_combo = 3
 system_directory = /home/web_user/retroarch/system/`
 var adminSessions = new Map();
+
+function normalizeRomName(value) {
+  return String(value || '')
+    .replace(/\.[^.]+$/, '')
+    .replace(/\s*\([^)]*\)/g, '')
+    .replace(/\s*\[[^\]]*\]/g, '')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+async function autoIdentifyPreferredRegion(dir, preferredRegion) {
+  if (!preferredRegion) {
+    return 0;
+  }
+  let shaPath = hashPath + dir + '/roms/';
+  if (!fs.existsSync(shaPath)) {
+    return 0;
+  }
+  await fsw.mkdir(metaPath, { recursive: true });
+  let metaData = JSON.parse(await fsw.readFile('./metadata/' + dir + '.json', 'utf8'));
+  let userMetaFile = metaPath + dir + '.json';
+  let userMeta = {};
+  if (fs.existsSync(userMetaFile)) {
+    userMeta = JSON.parse(await fsw.readFile(userMetaFile, 'utf8'));
+  }
+  metaData = merge(metaData, userMeta);
+  let region = String(preferredRegion).toLowerCase();
+  let files = await fsw.readdir(shaPath);
+  let linked = 0;
+  for await (let file of files) {
+    let romFile = file.replace('.sha1', '');
+    let sha = await fsw.readFile(shaPath + file, 'utf8');
+    if (metaData.hasOwnProperty(sha)) {
+      continue;
+    }
+    let targetName = normalizeRomName(romFile);
+    let romRegion = (romFile.match(/\(([^)]*)\)/) || [])[1];
+    let effectiveRegion = String(romRegion || region).toLowerCase();
+    if (!effectiveRegion) {
+      continue;
+    }
+    let matches = Object.keys(metaData).filter(function(metaSha) {
+      let record = metaData[metaSha];
+      if (!record || !record.name) {
+        return false;
+      }
+      let name = String(record.name);
+      return normalizeRomName(name) === targetName && name.toLowerCase().indexOf('(' + effectiveRegion + ')') !== -1;
+    });
+    if (matches.length === 1) {
+      userMeta[sha] = {ref: matches[0]};
+      linked++;
+    }
+  }
+  if (linked > 0) {
+    await fsw.writeFile(userMetaFile, JSON.stringify(userMeta, null, 2));
+  }
+  return linked;
+}
 
 function roleFor(profileRecord) {
   if (profileRecord.role) {
@@ -169,6 +231,33 @@ baserouter.post('/adminlogout', function(req, res) {
   }
   res.setHeader('Set-Cookie', 'ejs_admin_session=; Path=' + baseUrl + '; SameSite=Lax; HttpOnly; Max-Age=0');
   res.json({status: 'success'});
+});
+baserouter.post('/profileapi', function(req, res) {
+  let body = JSON.stringify(req.body || {});
+  let proxy = httpModule.request({
+    method: 'POST',
+    hostname: '127.0.0.1',
+    port: 3001,
+    path: '/',
+    headers: {
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(body),
+      'X-Forwarded-For': req.headers['x-forwarded-for'] || req.socket.remoteAddress || '',
+      'User-Agent': req.headers['user-agent'] || '',
+      'Referer': req.headers.referer || '',
+      'Origin': req.headers.origin || '',
+      'Host': req.headers.host || ''
+    }
+  }, function(proxyRes) {
+    res.status(proxyRes.statusCode || 200);
+    proxyRes.pipe(res);
+  });
+  proxy.on('error', function(e) {
+    console.log(e);
+    res.status(500).json({status: 'error'});
+  });
+  proxy.write(body);
+  proxy.end();
 });
 baserouter.get("/", function (req, res) {
   res.sendFile(__dirname + '/public/index.html');
@@ -399,6 +488,7 @@ io.on('connection', async function (socket) {
   function scanRoms(data) {
     let folder = data[0];
     let fullScan = data[1];
+    let preferredRegion = data[2] || '';
     socket.emit('emptymodal');
     let scanProcess = spawn('./has_files.sh', ['/' + folder + '/roms/', folder, fullScan]);
     scanProcess.stdout.setEncoding('utf8');
@@ -409,8 +499,17 @@ io.on('connection', async function (socket) {
     scanProcess.stderr.on('data', function(data) {
       socket.emit('modaldata', data);
     });
-    scanProcess.on('close', function(code) {
+    scanProcess.on('close', async function(code) {
       socket.emit('modaldata', 'Scan exited with code: ' + code);
+      if (preferredRegion) {
+        try {
+          let linked = await autoIdentifyPreferredRegion(folder, preferredRegion);
+          socket.emit('modaldata', 'Preferred region auto-linked ' + linked + ' item(s).');
+        } catch(e) {
+          console.log(e);
+          socket.emit('modaldata', 'Preferred region auto-link failed.');
+        }
+      }
       if (fullScan) {
         renderRoms();
       } else {
@@ -626,6 +725,16 @@ io.on('connection', async function (socket) {
     // Tell client to render
     getRoms(dir);
   };
+
+  async function clearRomScan(data) {
+    let dir = data[0];
+    let file = data[1];
+    let shaFile = hashPath + dir + '/roms/' + file + '.sha1';
+    if (fs.existsSync(shaFile)) {
+      fs.unlinkSync(shaFile);
+    }
+    getRoms(dir);
+  }
 
   // Get combined metadata
   async function getMeta(dir) {
@@ -888,6 +997,7 @@ io.on('connection', async function (socket) {
   socket.on('uploadart', requireAdmin(uploadArt));
   socket.on('updatevidposition', requireAdmin(updateVidPosition));
   socket.on('removemeta', requireAdmin(removeMeta));
+  socket.on('clearromscan', requireAdmin(clearRomScan));
   socket.on('custommeta', requireAdmin(customMeta));
   socket.on('rendermeta', requireAdmin(renderMeta));
 });

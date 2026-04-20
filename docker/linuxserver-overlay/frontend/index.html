@@ -6,12 +6,12 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="apple-touch-icon" href="icon.png" crossorigin="use-credentials">
     <link rel="manifest" href="manifest.json" crossorigin="use-credentials">
-    <link rel="stylesheet" href="css/index.css?v=20260419-profile-modal">
+    <link rel="stylesheet" href="css/index.css?v=20260420-account-video">
     <script src="js/vendor/jquery.min.js"></script>
     <script src="js/vendor/hammer.min.js"></script>
     <script src="js/vendor/browserfs.min.js"></script>
     <script src="js/vendor/jszip.min.js"></script>
-    <script src="js/index.js?v=20260419-profile-modal"></script>
+    <script src="js/index.js?v=20260420-account-video"></script>
   </head>
   <body>
     <div id="menu">
@@ -84,6 +84,7 @@
           <input id="profile-pass" type="password" placeholder="pass" autocomplete="current-password">
           <div class="search-actions">
             <button type="button" onclick="profileLogin()">Login</button>
+            <button type="button" onclick="forgotProfilePassword()">Forgot password</button>
           </div>
         </div>
         <div id="profile-logged-in" class="hidden">
@@ -97,6 +98,12 @@
               <button type="button" onclick="pullServerProfile()">Pull from Server</button>
               <button type="button" onclick="pushServerProfile()">Push to Server</button>
               <button type="button" onclick="profileLogout()">Logout</button>
+            </div>
+            <div class="profile-password-panel">
+              <h3>Update Password</h3>
+              <input id="profile-old-pass" type="password" placeholder="Old password" autocomplete="current-password">
+              <input id="profile-new-pass" type="password" placeholder="New password" autocomplete="new-password">
+              <button type="button" onclick="changeProfilePassword()">Update Password</button>
             </div>
           </div>
           <div id="profile-tab-panel-saves" class="hidden">

@@ -297,6 +297,26 @@ button:focus-visible {
   margin-left: 20px;
 }
 
+.scan-region-controls {
+  display: grid;
+  gap: 6px;
+  margin: 10px 12px 16px;
+}
+
+.scan-region-controls label {
+  color: var(--text-muted);
+  font-weight: 700;
+}
+
+#gameSelectionFilter {
+  width: min(420px, 100%);
+  margin-right: 8px;
+}
+
+#gameselection {
+  width: min(680px, 100%);
+}
+
 .hidden {
   display: none;
 }

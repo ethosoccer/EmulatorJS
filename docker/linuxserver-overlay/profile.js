@@ -7,6 +7,8 @@ var fs = require('fs');
 var fsw = require('fs').promises;
 var path = require('path');
 var JSZip = require('jszip');
+var http = require('http');
+var https = require('https');
 
 // Default vars
 var error = {status: 'error'};
@@ -23,6 +25,10 @@ function roleFor(profileRecord) {
   return 'user';
 }
 
+function defaultSettings() {
+  return {requireLogin: false, passwordResetWebhook: ''};
+}
+
 async function readProfiles() {
   let profileJson = await fsw.readFile(home + '/profile/profile.json', 'utf8');
   return JSON.parse(profileJson);
@@ -34,14 +40,65 @@ async function writeProfiles(profile) {
 
 async function readSettings() {
   try {
-    return JSON.parse(await fsw.readFile(settingsFile, 'utf8'));
+    return Object.assign(defaultSettings(), JSON.parse(await fsw.readFile(settingsFile, 'utf8')));
   } catch(e) {
-    return {requireLogin: false};
+    return defaultSettings();
   }
 }
 
 async function writeSettings(settings) {
-  await fsw.writeFile(settingsFile, JSON.stringify(settings, null, 2));
+  await fsw.writeFile(settingsFile, JSON.stringify(Object.assign(defaultSettings(), settings), null, 2));
+}
+
+function hashProfile(user, pass) {
+  return crypto.createHash('sha256').update(user + pass).digest('hex');
+}
+
+function findUserHash(profile, username) {
+  for (let userHash of Object.keys(profile)) {
+    if (profile[userHash].username == username) {
+      return userHash;
+    }
+  }
+  return null;
+}
+
+function requestIp(req) {
+  return req.headers['cf-connecting-ip'] || req.headers['x-real-ip'] || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '';
+}
+
+function sendWebhook(url, payload) {
+  return new Promise(function(resolve, reject) {
+    try {
+      let parsed = new URL(url);
+      let body = JSON.stringify(payload);
+      let client = parsed.protocol === 'https:' ? https : http;
+      let request = client.request({
+        method: 'POST',
+        hostname: parsed.hostname,
+        port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
+        path: parsed.pathname + parsed.search,
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(body)
+        },
+        timeout: 10000
+      }, function(response) {
+        response.resume();
+        response.on('end', function() {
+          resolve(response.statusCode >= 200 && response.statusCode < 300);
+        });
+      });
+      request.on('timeout', function() {
+        request.destroy(new Error('Webhook timed out'));
+      });
+      request.on('error', reject);
+      request.write(body);
+      request.end();
+    } catch(e) {
+      reject(e);
+    }
+  });
 }
 
 // Catch all to detect endpoint
@@ -88,6 +145,29 @@ app.post('/*', async function(req, res) {
         res.json(error);
       }
     } else {
+      if (type == 'forgotpassword') {
+        let settings = await readSettings();
+        if (!settings.passwordResetWebhook) {
+          res.json(error);
+          return;
+        }
+        let payload = {
+          title: 'EmulatorJS password reset requested',
+          event: 'password_reset_requested',
+          requestedUser: req.body.user || '',
+          source: req.body.source || 'unknown',
+          time: new Date().toISOString(),
+          ip: requestIp(req),
+          forwardedFor: req.headers['x-forwarded-for'] || '',
+          userAgent: req.headers['user-agent'] || '',
+          host: req.headers.host || '',
+          origin: req.headers.origin || '',
+          referer: req.headers.referer || ''
+        };
+        let sent = await sendWebhook(settings.passwordResetWebhook, payload);
+        res.json(sent ? {status: 'success'} : error);
+        return;
+      }
       let auth = req.body.user + req.body.pass;
       // Simple hash auth
       let hash = crypto.createHash('sha256').update(auth).digest('hex');
@@ -121,6 +201,39 @@ app.post('/*', async function(req, res) {
           }
           await writeProfiles(profile);
           res.json({status: 'success'});
+        } else if (type == 'changepassword') {
+          let newPass = req.body.newPass;
+          if (!newPass) {
+            res.json(error);
+            return;
+          }
+          if (currentRole !== 'admin' && hashProfile(profile[hash].username, req.body.oldPass || '') !== hash) {
+            res.json(error);
+            return;
+          }
+          let record = profile[hash];
+          let newHash = hashProfile(record.username, newPass);
+          delete profile[hash];
+          profile[newHash] = record;
+          await writeProfiles(profile);
+          res.json({status: 'success'});
+        } else if (type == 'adminchangepassword') {
+          if (currentRole !== 'admin') {
+            res.json(error);
+            return;
+          }
+          let targetHash = findUserHash(profile, req.body.target);
+          let newPass = req.body.newPass;
+          if (!targetHash || !newPass) {
+            res.json(error);
+            return;
+          }
+          let record = profile[targetHash];
+          let newHash = hashProfile(record.username, newPass);
+          delete profile[targetHash];
+          profile[newHash] = record;
+          await writeProfiles(profile);
+          res.json({status: 'success'});
         } else if (type == 'createsimpleuser') {
           if (currentRole !== 'admin') {
             res.json(error);
@@ -133,7 +246,7 @@ app.post('/*', async function(req, res) {
             res.json(error);
             return;
           }
-          let newHash = crypto.createHash('sha256').update(newUser + newPass).digest('hex');
+          let newHash = hashProfile(newUser, newPass);
           profile[newHash] = {username: newUser, role: newRole};
           await writeProfiles(profile);
           if (!fs.existsSync(home + '/profile/' + newUser)) {
@@ -147,14 +260,37 @@ app.post('/*', async function(req, res) {
             return;
           }
           let settings = await readSettings();
-          res.json({status: 'success', requireLogin: settings.requireLogin === true});
+          res.json({status: 'success', requireLogin: settings.requireLogin === true, passwordResetWebhook: settings.passwordResetWebhook || ''});
         } else if (type == 'setsettings') {
           if (currentRole !== 'admin') {
             res.json(error);
             return;
           }
-          await writeSettings({requireLogin: req.body.requireLogin === true});
+          let settings = await readSettings();
+          settings.requireLogin = req.body.requireLogin === true;
+          settings.passwordResetWebhook = req.body.passwordResetWebhook || '';
+          await writeSettings(settings);
           res.json({status: 'success'});
+        } else if (type == 'testpasswordresetwebhook') {
+          if (currentRole !== 'admin') {
+            res.json(error);
+            return;
+          }
+          let settings = await readSettings();
+          if (!settings.passwordResetWebhook) {
+            res.json(error);
+            return;
+          }
+          let sent = await sendWebhook(settings.passwordResetWebhook, {
+            title: 'EmulatorJS password reset webhook test',
+            event: 'password_reset_webhook_test',
+            requestedBy: profile[hash].username,
+            time: new Date().toISOString(),
+            ip: requestIp(req),
+            userAgent: req.headers['user-agent'] || '',
+            host: req.headers.host || ''
+          });
+          res.json(sent ? {status: 'success'} : error);
         // Take client data and write it to profile
         } else if (type == 'push') {
           let profilePath = home + '/profile/' + profile[hash].username + '/';

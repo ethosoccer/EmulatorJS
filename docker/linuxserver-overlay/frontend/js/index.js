@@ -29,6 +29,7 @@ var profilePushTimeout;
 var profilePushInFlight = false;
 var saveInventoryCache;
 var saveInventoryLoading;
+var savePanelBackHandler = null;
 var requireMainLogin = false;
 var isSafari = navigator.vendor && navigator.vendor.indexOf('Apple') > -1 &&
                navigator.userAgent &&
@@ -244,6 +245,9 @@ function saveRecordMatchesGame(record, gameBase) {
   var saveKey = saveMatchKey(record.name || record.key || '');
   return gameKey && saveKey && (saveKey.indexOf(gameKey) !== -1 || gameKey.indexOf(saveKey) !== -1);
 }
+function saveVariantGroupKey(record) {
+  return String(record.name || record.key || '').toLowerCase();
+}
 function installQuickSaveMirror(gameName) {
   var attempts = 0;
   var timer = setInterval(function() {
@@ -329,38 +333,101 @@ function profileSaveSource(fileName) {
   var parts = String(fileName || '').split('/');
   return 'Profile: ' + (parts[0] || 'saves') + (parts[1] ? '/' + parts[1] : '');
 }
+function isHistoryProfileSavePath(fileName) {
+  return /^\.history\/[^/]+\/(states|saves)\/.+\/.+/i.test(fileName);
+}
+function historyRelativeSavePath(fileName) {
+  return String(fileName || '').replace(/^\.history\/[^/]+\//i, '');
+}
+function historyVersionLabel(fileName) {
+  var match = String(fileName || '').match(/^\.history\/([^/]+)\//i);
+  return match ? match[1] : 'Local backup';
+}
+async function buildLocalProfileSaveInventory() {
+  try {
+    await setupProfileFs();
+    var files = [];
+    async function walk(dirPath) {
+      if (!profileFs.existsSync(dirPath)) {
+        return;
+      }
+      var items = profileFs.readdirSync(dirPath);
+      for (var item of items) {
+        var fullPath = (dirPath === '/' ? '' : dirPath) + '/' + item;
+        if (profileFs.lstatSync(fullPath).isDirectory()) {
+          await walk(fullPath);
+        } else {
+          files.push(fullPath.replace(/^\//, ''));
+        }
+      }
+    }
+    await walk('/');
+    var saves = [];
+    for (var fileName of files) {
+      var localName = fileName;
+      var versionLabel = 'Local profile';
+      if (isHistoryProfileSavePath(fileName)) {
+        localName = historyRelativeSavePath(fileName);
+        versionLabel = historyVersionLabel(fileName);
+      }
+      if (!isProfileSavePath(localName)) {
+        continue;
+      }
+      var bytes = profileFs.readFileSync('/' + fileName);
+      var localStat = profileFs.statSync('/' + fileName);
+      saves.push({
+        id: 'localprofile::' + fileName,
+        key: fileName,
+        name: localName.split('/').pop(),
+        type: profileSaveType(localName),
+        source: isHistoryProfileSavePath(fileName) ? 'Local backup: ' + versionLabel : profileSaveSource(localName),
+        size: saveByteLength(bytes),
+        versionLabel: versionLabel,
+        versionSort: localStat && localStat.mtimeMs ? localStat.mtimeMs : Date.now(),
+        load: async function(data) {
+          return data;
+        }.bind(null, bytes)
+      });
+    }
+    return saves;
+  } catch(e) {
+    console.log('Unable to scan local profile saves', e);
+    return [];
+  }
+}
 async function buildProfileSaveInventory() {
   if (!localStorage.getItem('user') || !localStorage.getItem('pass')) {
     return [];
   }
   try {
-    var response = await profileRequest(profileRequestBody('pull'));
-    var profile = await response.json();
-    if (profile.status !== 'success' || !profile.data) {
-      return [];
-    }
-    var zip = await JSZip.loadAsync(profile.data, {base64: true});
     var saves = [];
-    for (var fileName of Object.keys(zip.files)) {
-      var file = zip.files[fileName];
-      if (file.dir || !isProfileSavePath(fileName)) {
-        continue;
-      }
-      var bytes = await file.async('uint8array');
-      var displayName = String(fileName).split('/').pop();
-      try {
-        displayName = decodeURIComponent(displayName);
-      } catch(e) {}
+    saves = saves.concat(await buildLocalProfileSaveInventory());
+    var response = await profileRequest(profileRequestBody('listprofilesaves'));
+    var profile = await response.json();
+    if (profile.status !== 'success' || !profile.saves) {
+      return saves;
+    }
+    for (var profileSave of profile.saves) {
       saves.push({
-        id: 'profile::' + fileName,
-        key: fileName,
-        name: displayName,
-        type: profileSaveType(fileName),
-        source: profileSaveSource(fileName),
-        size: saveByteLength(bytes),
-        load: async function(data) {
-          return data;
-        }.bind(null, bytes)
+        id: profileSave.id,
+        key: profileSave.key || profileSave.pathKey,
+        name: profileSave.name,
+        type: profileSave.type,
+        source: profileSave.source,
+        size: profileSave.size || 0,
+        versionLabel: profileSave.versionLabel || 'Server current',
+        versionSort: profileSave.versionSort || 0,
+        pathKey: profileSave.pathKey,
+        load: async function(pathKey) {
+          var download = await profileRequest(profileRequestBody('downloadprofilesave', {pathKey: pathKey}));
+          var json = await download.json();
+          if (json.status !== 'success' || !json.data) {
+            return null;
+          }
+          return Uint8Array.from(atob(json.data), function(char) {
+            return char.charCodeAt(0);
+          });
+        }.bind(null, profileSave.pathKey)
       });
     }
     return saves;
@@ -384,6 +451,8 @@ async function buildSaveInventory() {
       name: stateKey,
       type: 'Save State',
       source: 'EmulatorJS-states',
+      versionLabel: 'Local browser',
+      versionSort: Date.now(),
       size: saveByteLength(stateValue),
       load: async function(key) {
         return bytesFromSaveValue(await idbGetValue('EmulatorJS-states', 'states', key));
@@ -403,6 +472,8 @@ async function buildSaveInventory() {
       name: fileName,
       type: fileName.indexOf('quick.state') !== -1 ? 'Quick Save' : 'In-game Save',
       source: 'RetroArch saves',
+      versionLabel: 'Local browser',
+      versionSort: Date.now(),
       size: saveByteLength(fileValue),
       load: async function(key) {
         return bytesFromSaveValue(await idbGetValue('FILE_DATA', 'FILE_DATA', key));
@@ -457,6 +528,77 @@ async function downloadSaveFile(saveId) {
   a.remove();
   URL.revokeObjectURL(url);
 }
+function setSavePanelBack(handler) {
+  savePanelBackHandler = handler || null;
+  $('#save-panel-back').toggleClass('hidden', !savePanelBackHandler);
+}
+function savePanelBack() {
+  if (typeof savePanelBackHandler === 'function') {
+    savePanelBackHandler();
+  }
+}
+function groupSaveVariants(saves) {
+  var groups = {};
+  for (var save of saves) {
+    var key = saveVariantGroupKey(save);
+    if (!groups[key]) {
+      groups[key] = {
+        key: key,
+        name: save.name || save.key || 'Unknown save',
+        versions: []
+      };
+    }
+    groups[key].versions.push(save);
+  }
+  var grouped = Object.keys(groups).map(function(key) {
+    groups[key].versions.sort(function(a, b) {
+      return Number(b.versionSort || 0) - Number(a.versionSort || 0);
+    });
+    groups[key].latest = groups[key].versions[0];
+    return groups[key];
+  });
+  grouped.sort(function(a, b) {
+    return a.name.localeCompare(b.name);
+  });
+  return grouped;
+}
+function renderSaveVersionRows(target, saves) {
+  $(target).empty();
+  for (var save of saves) {
+    var row = $('<div>').addClass('save-file-row');
+    var detail = $('<button>').addClass('search-result').attr('type', 'button');
+    detail.append($('<span>').addClass('save-file-title').text(save.name));
+    detail.append($('<span>').addClass('save-file-meta').text((save.versionLabel || save.source || 'Version') + ' - ' + (save.type || 'Save') + ' - ' + formatBytes(save.size)));
+    detail.on('click', function(saveId) {
+      return function() {
+        downloadSaveFile(saveId);
+      };
+    }(save.id));
+    var download = $('<button>').attr('type', 'button').text('Download');
+    download.on('click', function(saveId) {
+      return function() {
+        downloadSaveFile(saveId);
+      };
+    }(save.id));
+    row.append(detail, download);
+    $(target).append(row);
+  }
+}
+function openSaveVersionPicker(group, backHandler) {
+  setSavePanelBack(backHandler);
+  $('#save-panel').removeClass('hidden');
+  $('#save-panel-title').text(group.name + ' Versions');
+  $('#save-panel-status').text(group.versions.length + ' version' + (group.versions.length === 1 ? '' : 's') + ' available');
+  $('#save-panel-results').empty();
+  if (group.versions.length > 1) {
+    var allButton = $('<button>').attr('type', 'button').text('Download All Versions');
+    allButton.on('click', function() {
+      downloadSaveList(group.versions.map(function(save) { return save.id; }), saveBasename(group.name) + '-versions.zip');
+    });
+    $('#save-panel-results').append(allButton);
+  }
+  renderSaveVersionRows('#save-panel-results', group.versions);
+}
 async function downloadSaveList(saveIds, fileName) {
   var zip = new JSZip();
   for (var saveId of saveIds) {
@@ -466,7 +608,8 @@ async function downloadSaveList(saveIds, fileName) {
     }
     var bytes = await save.load();
     if (bytes) {
-      zip.file((save.type || 'Save') + '/' + (save.name || save.key), bytes);
+      var folder = (save.type || 'Save') + '/' + (save.versionLabel || save.source || 'Version').replace(/[\\/:*?"<>|]+/g, '-');
+      zip.file(folder + '/' + (save.name || save.key), bytes);
     }
   }
   var blob = await zip.generateAsync({type:'blob'});
@@ -487,33 +630,35 @@ async function downloadAllSaves() {
   }
   await downloadSaveList(saves.map(function(save) { return save.id; }), 'emulatorjs-saves.zip');
 }
-function renderSaveRows(target, saves, emptyMessage) {
+function renderSaveRows(target, saves, emptyMessage, backHandler) {
   $(target).empty();
   if (saves.length === 0) {
     $(target).append($('<div>').addClass('search-status').text(emptyMessage || 'No saves found.'));
     return;
   }
-  for (var save of saves) {
+  var groups = groupSaveVariants(saves);
+  for (var group of groups) {
     var row = $('<div>').addClass('save-file-row');
     var detail = $('<button>').addClass('search-result').attr('type', 'button');
-    detail.append($('<span>').addClass('save-file-title').text(save.name));
-    detail.append($('<span>').addClass('save-file-meta').text(save.type + ' - ' + save.source + ' - ' + formatBytes(save.size)));
-    detail.on('click', function(saveId) {
+    detail.append($('<span>').addClass('save-file-title').text(group.name));
+    detail.append($('<span>').addClass('save-file-meta').text((group.latest.type || 'Save') + ' - ' + (group.latest.versionLabel || group.latest.source || 'Latest') + ' - ' + group.versions.length + ' version' + (group.versions.length === 1 ? '' : 's')));
+    detail.on('click', function(saveGroup) {
       return function() {
-        downloadSaveFile(saveId);
+        openSaveVersionPicker(saveGroup, backHandler);
       };
-    }(save.id));
-    var download = $('<button>').attr('type', 'button').text('Download');
-    download.on('click', function(saveId) {
+    }(group));
+    var download = $('<button>').attr('type', 'button').text(group.versions.length > 1 ? 'Versions' : 'Download');
+    download.on('click', function(saveGroup) {
       return function() {
-        downloadSaveFile(saveId);
+        openSaveVersionPicker(saveGroup, backHandler);
       };
-    }(save.id));
+    }(group));
     row.append(detail, download);
     $(target).append(row);
   }
 }
 function closeSavePanel() {
+  setSavePanelBack(null);
   $('#save-panel').addClass('hidden');
 }
 async function openGameSaves(event, gameName, gameBase) {
@@ -528,11 +673,14 @@ async function openGameSaves(event, gameName, gameBase) {
   $('#save-panel-status').text('Loading saves...');
   $('#save-panel-results').empty();
   $('#save-panel').removeClass('hidden');
+  setSavePanelBack(null);
   var saves = (await getSaveInventory(true)).filter(function(save) {
     return saveRecordMatchesGame(save, gameBase);
   });
   $('#save-panel-status').text(saves.length + ' save' + (saves.length === 1 ? '' : 's') + ' found');
-  renderSaveRows('#save-panel-results', saves, 'No local saves found for this game yet.');
+  renderSaveRows('#save-panel-results', saves, 'No local saves found for this game yet.', function() {
+    openGameSaves(null, gameName, gameBase);
+  });
   if (saves.length > 1) {
     var allButton = $('<button>').attr('type', 'button').text('Download All for This Game');
     allButton.on('click', function() {
@@ -546,7 +694,10 @@ async function renderProfileSaves() {
   $('#profile-saves-results').empty();
   var saves = await getSaveInventory(true);
   $('#profile-saves-status').text(saves.length + ' save' + (saves.length === 1 ? '' : 's') + ' found');
-  renderSaveRows('#profile-saves-results', saves, 'No local saves found yet.');
+  renderSaveRows('#profile-saves-results', saves, 'No local saves found yet.', function() {
+    closeSavePanel();
+    showProfileTab('saves');
+  });
 }
 function showProfileTab(tab) {
   var showSaves = tab === 'saves';
@@ -764,7 +915,41 @@ async function rmProfileDir(dirPath) {
     console.log(e);
   }
 }
+function ensureProfileDirSync(dirPath) {
+  if (!dirPath || dirPath === '/' || profileFs.existsSync(dirPath)) {
+    return;
+  }
+  var parent = dirPath.split('/').slice(0, -1).join('/') || '/';
+  if (parent !== dirPath) {
+    ensureProfileDirSync(parent);
+  }
+  if (!profileFs.existsSync(dirPath)) {
+    profileFs.mkdirSync(dirPath);
+  }
+}
+function localProfileBackupPath(relativePath, stamp) {
+  return '/.history/' + stamp + '/' + String(relativePath || '').replace(/^\/+/, '');
+}
+async function writeProfileFileWithBackup(relativePath, buffer, stamp) {
+  var targetPath = '/' + String(relativePath || '').replace(/^\/+/, '');
+  var parent = targetPath.split('/').slice(0, -1).join('/') || '/';
+  ensureProfileDirSync(parent);
+  if (profileFs.existsSync(targetPath)) {
+    var existing = profileFs.readFileSync(targetPath);
+    if (Buffer.from(existing).equals(Buffer.from(buffer))) {
+      return;
+    }
+    var backupPath = localProfileBackupPath(relativePath, stamp);
+    var backupParent = backupPath.split('/').slice(0, -1).join('/') || '/';
+    ensureProfileDirSync(backupParent);
+    profileFs.writeFileSync(backupPath, Buffer.from(existing));
+  }
+  profileFs.writeFileSync(targetPath, Buffer.from(buffer));
+}
 async function addProfileFsToZip(zip, item) {
+  if (item === '/.history' || item.indexOf('/.history/') === 0) {
+    return;
+  }
   if (profileFs.lstatSync(item).isDirectory()) {
     var items = profileFs.readdirSync(item);
     if (items.length > 0) {
@@ -794,12 +979,10 @@ async function pullServerProfile(silent) {
     }
     var zip = new JSZip();
     var contents = await zip.loadAsync(json.data, {base64: true});
-    await rmProfileDir('/');
+    var pullStamp = Date.now().toString();
     for await (var fileName of Object.keys(contents.files)) {
       if (fileName.endsWith('/') && fileName !== favoritesProfileFile) {
-        if (!profileFs.existsSync('/' + fileName)) {
-          profileFs.mkdirSync('/' + fileName);
-        }
+        ensureProfileDirSync('/' + fileName.replace(/\/+$/, ''));
       }
     }
     for await (var pullFileName of Object.keys(contents.files)) {
@@ -808,7 +991,7 @@ async function pullServerProfile(silent) {
           restoreFavoritesFromProfile(await zip.file(pullFileName).async('string'));
         } else {
           var content = await zip.file(pullFileName).async('arraybuffer');
-          profileFs.writeFileSync('/' + pullFileName, Buffer.from(content));
+          await writeProfileFileWithBackup(pullFileName, Buffer.from(content), pullStamp);
         }
       }
     }
@@ -1257,25 +1440,27 @@ var loadart = debounce(function(active_item) {
 // Load logo list
 function loadlogos(logo_load_start, display_items, items_length, active_item) {
   for (var i = 0; i < display_items; i++) {
-    item_num = logo_load_start;
+    var item_num = logo_load_start;
     if (items_length >= 0) {
       item_num = ((item_num % (items_length + 1)) + (items_length + 1)) % (items_length + 1);
     }
-    var has_logo = $('#i' + item_num.toString()).data('has_logo');
-    var name = $('#i' + item_num.toString()).data('name');
+    var itemLink = $('#i' + item_num.toString());
+    var has_logo = itemLink.data('has_logo');
+    var name = itemLink.data('name');
+    var path = 'user/' + itemLink.data('path') + '/logos/';
+    var logo_src = encodeURI(path + name + '.png');
     if (has_logo) {
-      var path = 'user/' + $('#i' + item_num.toString()).data('path') + '/logos/';
-      var logo_src = path + name + '.png';
-      $($('#i' + item_num.toString()).children()[0]).prop('src',logo_src);
+      $(itemLink.children()[0]).attr('src', logo_src);
       $('#active' + i).empty();
       $('#active' + i).append($('#m' + item_num).html());
+      $('#active' + i).find('img.menu-img').attr('src', logo_src);
     } else {
       $('#active' + i).empty();
       $('#active' + i).append($('#m' + item_num).html());
     }
-    logo_load_start++
-  };
-};
+    logo_load_start++;
+  }
+}
 // Launcher
 function launch(active_item) {
   var selected = active_item && active_item.nodeType ? $(active_item) : $('#i' + active_item.toString()).first();

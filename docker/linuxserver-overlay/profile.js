@@ -101,6 +101,65 @@ function sendWebhook(url, payload) {
   });
 }
 
+function profilePathForUser(username) {
+  return path.join(home, 'profile', username);
+}
+
+function safeProfilePath(basePath, relativePath) {
+  let cleaned = String(relativePath || '').replace(/\\/g, '/').replace(/^\/+/, '');
+  let resolved = path.resolve(basePath, cleaned);
+  let root = path.resolve(basePath) + path.sep;
+  if (resolved !== path.resolve(basePath) && !resolved.startsWith(root)) {
+    throw new Error('Unsafe profile path');
+  }
+  return resolved;
+}
+
+function timestampLabel() {
+  return new Date().toISOString().replace(/[:.]/g, '-');
+}
+
+function isSaveFile(relativePath) {
+  return /^states\/.+\/.+/i.test(relativePath) || /^saves\/.+\/.+/i.test(relativePath);
+}
+
+function saveTypeForPath(relativePath) {
+  if (/^states\//i.test(relativePath)) {
+    return /\.auto$/i.test(relativePath) ? 'Auto Save State' : 'Save State';
+  }
+  return 'In-game Save';
+}
+
+async function ensureDir(filePath) {
+  await fsw.mkdir(path.dirname(filePath), {recursive: true});
+}
+
+async function collectFiles(rootPath, relativeRoot, into) {
+  if (!fs.existsSync(rootPath)) {
+    return into;
+  }
+  let items = await fsw.readdir(rootPath);
+  for await (let item of items) {
+    let fullPath = path.join(rootPath, item);
+    let relPath = relativeRoot ? path.posix.join(relativeRoot, item) : item;
+    let stat = await fsw.stat(fullPath);
+    if (stat.isDirectory()) {
+      await collectFiles(fullPath, relPath, into);
+    } else {
+      into.push({fullPath: fullPath, relPath: relPath, stat: stat});
+    }
+  }
+  return into;
+}
+
+function safeDecodeName(value) {
+  try {
+    return decodeURIComponent(value);
+  } catch(e) {
+    return value;
+  }
+}
+
 // Catch all to detect endpoint
 app.get('/*', function(req, res) {
   res.send('pong');
@@ -295,41 +354,89 @@ app.post('/*', async function(req, res) {
             host: req.headers.host || ''
           });
           res.json(sent ? {status: 'success'} : error);
-        // Take client data and write it to profile
-        } else if (type == 'push') {
-          let profilePath = home + '/profile/' + profile[hash].username + '/';
-          let baseData = req.body.data;
-          // Purge current storage
-          let items = await fsw.readdir(profilePath);
-          if (items.length > 0) {
-            for await (let item of items) {
-              var filePath = profilePath + item;
-              if (fs.statSync(filePath).isFile()) {
-                await fsw.rm(filePath);
-              } else {
-                await fsw.rm(filePath, { recursive: true, force: true });
-              }
+        } else if (type == 'listprofilesaves') {
+          let profilePath = profilePathForUser(profile[hash].username);
+          let records = [];
+          let currentFiles = await collectFiles(profilePath, '', []);
+          for await (let file of currentFiles) {
+            if (!isSaveFile(file.relPath) || file.relPath.startsWith('.history/')) {
+              continue;
             }
+            records.push({
+              id: 'profile::current::' + file.relPath,
+              pathKey: file.relPath,
+              name: safeDecodeName(path.basename(file.relPath)),
+              type: saveTypeForPath(file.relPath),
+              source: 'Profile: ' + file.relPath.split('/').slice(0, 2).join('/'),
+              versionLabel: 'Server current',
+              versionSort: file.stat.mtimeMs || 0,
+              size: file.stat.size || 0
+            });
           }
-          // Load zip from data
-          let zip = new JSZip();
-          zip.loadAsync(baseData, {base64: true}).then(async function(contents) {
-            // Unzip the files to the FS by name
-            for await (let fileName of Object.keys(contents.files)) {
-              if (fileName.endsWith('/')) {
-                if (! fs.existsSync(profilePath + fileName)) {
-                  await fsw.mkdir(profilePath + fileName);
+          let historyRoot = path.join(profilePath, '.history');
+          if (fs.existsSync(historyRoot)) {
+            let snapshots = await fsw.readdir(historyRoot);
+            for await (let snapshot of snapshots) {
+              let snapshotRoot = path.join(historyRoot, snapshot);
+              let snapshotFiles = await collectFiles(snapshotRoot, '', []);
+              for await (let file of snapshotFiles) {
+                if (!isSaveFile(file.relPath)) {
+                  continue;
                 }
-              }
-            }
-            for await (let fileName of Object.keys(contents.files)) {
-              if (! fileName.endsWith('/')) {
-                zip.file(fileName).async('arraybuffer').then(async function(content) {
-                  await fsw.writeFile(profilePath + fileName, Buffer.from(content));
+                records.push({
+                  id: 'profile::history::' + snapshot + '::' + file.relPath,
+                  pathKey: '.history/' + snapshot + '/' + file.relPath,
+                  name: safeDecodeName(path.basename(file.relPath)),
+                  type: saveTypeForPath(file.relPath),
+                  source: 'Profile backup: ' + snapshot,
+                  versionLabel: snapshot,
+                  versionSort: file.stat.mtimeMs || 0,
+                  size: file.stat.size || 0
                 });
               }
             }
-          });
+          }
+          res.json({status: 'success', saves: records});
+        } else if (type == 'downloadprofilesave') {
+          let profilePath = profilePathForUser(profile[hash].username);
+          let relativePath = String(req.body.pathKey || '');
+          if (!relativePath) {
+            res.json(error);
+            return;
+          }
+          let downloadPath = safeProfilePath(profilePath, relativePath);
+          if (!fs.existsSync(downloadPath) || fs.statSync(downloadPath).isDirectory()) {
+            res.json(error);
+            return;
+          }
+          let contents = await fsw.readFile(downloadPath);
+          res.json({status: 'success', data: contents.toString('base64')});
+        // Take client data and write it to profile
+        } else if (type == 'push') {
+          let profilePath = profilePathForUser(profile[hash].username);
+          let baseData = req.body.data;
+          await fsw.mkdir(profilePath, {recursive: true});
+          let zip = await JSZip.loadAsync(baseData, {base64: true});
+          let backupStamp = timestampLabel();
+          for await (let fileName of Object.keys(zip.files)) {
+            let zipEntry = zip.files[fileName];
+            if (zipEntry.dir) {
+              await fsw.mkdir(safeProfilePath(profilePath, fileName), {recursive: true});
+              continue;
+            }
+            let targetPath = safeProfilePath(profilePath, fileName);
+            let content = Buffer.from(await zipEntry.async('arraybuffer'));
+            await ensureDir(targetPath);
+            if (fs.existsSync(targetPath)) {
+              let existing = await fsw.readFile(targetPath);
+              if (!existing.equals(content)) {
+                let backupPath = safeProfilePath(profilePath, '.history/' + backupStamp + '/' + fileName);
+                await ensureDir(backupPath);
+                await fsw.copyFile(targetPath, backupPath);
+              }
+            }
+            await fsw.writeFile(targetPath, content);
+          }
           res.json({status: 'success',user: profile[hash].username});
         // Send client data to write to indexedDB
         } else if (type == 'pull') {
@@ -339,6 +446,9 @@ app.post('/*', async function(req, res) {
             let items = await fs.readdirSync(profilePath);
             async function addToZip(item) {
               if (fs.lstatSync(item).isDirectory()) {
+                if (path.basename(item) === '.history') {
+                  return;
+                }
                 let items = await fs.readdirSync(item);
                 if (items.length > 0) {
                   for await (let subPath of items) {

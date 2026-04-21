@@ -280,6 +280,10 @@ body.profile-required .login-panel {
   width: min(520px, calc(100vw - 24px));
 }
 
+.save-panel {
+  z-index: 1000001;
+}
+
 body.profile-required .login-panel {
   position: fixed;
   top: 50%;

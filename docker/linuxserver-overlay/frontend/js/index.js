@@ -63,6 +63,13 @@ function escapeHtml(value) {
     }[char];
   });
 }
+function safeDecodeDisplayName(value) {
+  try {
+    return decodeURIComponent(String(value || ''));
+  } catch(e) {
+    return String(value || '');
+  }
+}
 function hasUsableValue(value) {
   return typeof value !== 'undefined' && value !== null && String(value).trim() !== '' && String(value) !== 'undefined';
 }
@@ -293,6 +300,28 @@ function formatBytes(size) {
   }
   return Math.round(size / 1024 / 102.4) / 10 + ' MB';
 }
+function formatDateTime(timestamp) {
+  if (!timestamp) {
+    return 'time unavailable';
+  }
+  try {
+    return new Date(timestamp).toLocaleString([], {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit'
+    });
+  } catch(e) {
+    return 'time unavailable';
+  }
+}
+function saveVersionSummary(save) {
+  return (save.versionLabel || save.source || 'Version') + ' - ' + formatDateTime(save.versionSort) + ' - ' + (save.type || 'Save') + ' - ' + formatBytes(save.size);
+}
+function groupedSaveSummary(group) {
+  return (group.latest.type || 'Save') + ' - ' + (group.latest.versionLabel || group.latest.source || 'Latest') + ' - ' + formatDateTime(group.latest.versionSort) + ' - ' + group.versions.length + ' version' + (group.versions.length === 1 ? '' : 's');
+}
 function bytesFromSaveValue(value) {
   if (!value) {
     return null;
@@ -378,7 +407,7 @@ async function buildLocalProfileSaveInventory() {
       saves.push({
         id: 'localprofile::' + fileName,
         key: fileName,
-        name: localName.split('/').pop(),
+        name: safeDecodeDisplayName(localName.split('/').pop()),
         type: profileSaveType(localName),
         source: isHistoryProfileSavePath(fileName) ? 'Local backup: ' + versionLabel : profileSaveSource(localName),
         size: saveByteLength(bytes),
@@ -445,15 +474,15 @@ async function buildSaveInventory() {
       continue;
     }
     var stateValue = await idbGetValue('EmulatorJS-states', 'states', stateKey);
-    saves.push({
-      id: 'state::' + stateKey,
-      key: stateKey,
-      name: stateKey,
-      type: 'Save State',
-      source: 'EmulatorJS-states',
-      versionLabel: 'Local browser',
-      versionSort: Date.now(),
-      size: saveByteLength(stateValue),
+      saves.push({
+        id: 'state::' + stateKey,
+        key: stateKey,
+        name: safeDecodeDisplayName(stateKey),
+        type: 'Save State',
+        source: 'EmulatorJS-states',
+        versionLabel: 'Local browser',
+        versionSort: null,
+        size: saveByteLength(stateValue),
       load: async function(key) {
         return bytesFromSaveValue(await idbGetValue('EmulatorJS-states', 'states', key));
       }.bind(null, stateKey)
@@ -469,11 +498,11 @@ async function buildSaveInventory() {
     saves.push({
       id: 'file::' + fileKey,
       key: fileKey,
-      name: fileName,
+      name: safeDecodeDisplayName(fileName),
       type: fileName.indexOf('quick.state') !== -1 ? 'Quick Save' : 'In-game Save',
       source: 'RetroArch saves',
       versionLabel: 'Local browser',
-      versionSort: Date.now(),
+      versionSort: null,
       size: saveByteLength(fileValue),
       load: async function(key) {
         return bytesFromSaveValue(await idbGetValue('FILE_DATA', 'FILE_DATA', key));
@@ -568,7 +597,7 @@ function renderSaveVersionRows(target, saves) {
     var row = $('<div>').addClass('save-file-row');
     var detail = $('<button>').addClass('search-result').attr('type', 'button');
     detail.append($('<span>').addClass('save-file-title').text(save.name));
-    detail.append($('<span>').addClass('save-file-meta').text((save.versionLabel || save.source || 'Version') + ' - ' + (save.type || 'Save') + ' - ' + formatBytes(save.size)));
+    detail.append($('<span>').addClass('save-file-meta').text(saveVersionSummary(save)));
     detail.on('click', function(saveId) {
       return function() {
         downloadSaveFile(saveId);
@@ -587,7 +616,7 @@ function renderSaveVersionRows(target, saves) {
 function openSaveVersionPicker(group, backHandler) {
   setSavePanelBack(backHandler);
   $('#save-panel').removeClass('hidden');
-  $('#save-panel-title').text(group.name + ' Versions');
+  $('#save-panel-title').text(safeDecodeDisplayName(group.name) + ' Versions');
   $('#save-panel-status').text(group.versions.length + ' version' + (group.versions.length === 1 ? '' : 's') + ' available');
   $('#save-panel-results').empty();
   if (group.versions.length > 1) {
@@ -640,8 +669,8 @@ function renderSaveRows(target, saves, emptyMessage, backHandler) {
   for (var group of groups) {
     var row = $('<div>').addClass('save-file-row');
     var detail = $('<button>').addClass('search-result').attr('type', 'button');
-    detail.append($('<span>').addClass('save-file-title').text(group.name));
-    detail.append($('<span>').addClass('save-file-meta').text((group.latest.type || 'Save') + ' - ' + (group.latest.versionLabel || group.latest.source || 'Latest') + ' - ' + group.versions.length + ' version' + (group.versions.length === 1 ? '' : 's')));
+    detail.append($('<span>').addClass('save-file-title').text(safeDecodeDisplayName(group.name)));
+    detail.append($('<span>').addClass('save-file-meta').text(groupedSaveSummary(group)));
     detail.on('click', function(saveGroup) {
       return function() {
         openSaveVersionPicker(saveGroup, backHandler);
@@ -669,7 +698,7 @@ async function openGameSaves(event, gameName, gameBase) {
   closeSearchPanel();
   closeFavoritesPanel();
   closeLoginPanel();
-  $('#save-panel-title').text('Saves for ' + gameName);
+  $('#save-panel-title').text('Saves for ' + safeDecodeDisplayName(gameName));
   $('#save-panel-status').text('Loading saves...');
   $('#save-panel-results').empty();
   $('#save-panel').removeClass('hidden');

@@ -27,6 +27,9 @@ var profileFsReady;
 var profilePushTimer;
 var profilePushTimeout;
 var profilePushInFlight = false;
+var saveWatchTimer;
+var saveWatchInFlight = false;
+var lastSaveWatchSignature = null;
 var saveInventoryCache;
 var saveInventoryLoading;
 var savePanelBackHandler = null;
@@ -279,6 +282,7 @@ function installQuickSaveMirror(gameName) {
         try {
           var data = gameManager.FS.readFile('/' + saveSlot + '-quick.state');
           emulator.storage.states.put(quickSaveMirrorKey(gameName, saveSlot), data);
+          queueProfilePush(true);
         } catch(e) {
           console.log('Unable to mirror quick save', e);
         }
@@ -341,6 +345,20 @@ function saveByteLength(value) {
   }
   return bytes.byteLength || bytes.length || 0;
 }
+function saveBytesSignature(value) {
+  var bytes = bytesFromSaveValue(value);
+  if (!bytes) {
+    return '0:0:0:0';
+  }
+  var length = bytes.byteLength || bytes.length || 0;
+  if (!length) {
+    return '0:0:0:0';
+  }
+  var first = bytes[0] || 0;
+  var middle = bytes[Math.floor(length / 2)] || 0;
+  var last = bytes[length - 1] || 0;
+  return [length, first, middle, last].join(':');
+}
 function profileRequestBody(type, extra) {
   var body = {
     user: localStorage.getItem('user'),
@@ -348,6 +366,43 @@ function profileRequestBody(type, extra) {
     type: type
   };
   return Object.assign(body, extra || {});
+}
+async function buildLocalSaveWatchSignature() {
+  var parts = [];
+  var stateKeys = (await idbGetKeys('EmulatorJS-states', 'states')).filter(function(key) {
+    return key && key !== '?EJS_KEYS!';
+  }).sort();
+  for (var stateKey of stateKeys) {
+    var stateValue = await idbGetValue('EmulatorJS-states', 'states', stateKey);
+    parts.push('state:' + stateKey + ':' + saveBytesSignature(stateValue));
+  }
+  var fileKeys = (await idbGetKeys('FILE_DATA', 'FILE_DATA')).filter(function(key) {
+    return key && String(key).indexOf('/data/saves/') !== -1;
+  }).sort();
+  for (var fileKey of fileKeys) {
+    var fileValue = await idbGetValue('FILE_DATA', 'FILE_DATA', fileKey);
+    parts.push('file:' + fileKey + ':' + saveBytesSignature(fileValue));
+  }
+  return parts.join('|');
+}
+async function watchLocalSaveChanges(forceBaseline) {
+  if (saveWatchInFlight || !localStorage.getItem('user') || !localStorage.getItem('pass')) {
+    return;
+  }
+  saveWatchInFlight = true;
+  try {
+    var signature = await buildLocalSaveWatchSignature();
+    if (forceBaseline || lastSaveWatchSignature === null) {
+      lastSaveWatchSignature = signature;
+    } else if (signature !== lastSaveWatchSignature) {
+      lastSaveWatchSignature = signature;
+      setProfileStatus('Save change detected. Pushing to server...');
+      queueProfilePush(true);
+    }
+  } catch(e) {
+    console.log('Save watcher error', e);
+  }
+  saveWatchInFlight = false;
 }
 function isProfileSavePath(fileName) {
   return /^states\/.+\/.+/i.test(fileName) || /^saves\/.+\/.+/i.test(fileName);
@@ -799,6 +854,11 @@ function updateLoginState() {
     }
     scheduleProfileAutoPush();
   } else {
+    clearInterval(profilePushTimer);
+    clearInterval(saveWatchTimer);
+    profilePushTimer = null;
+    saveWatchTimer = null;
+    lastSaveWatchSignature = null;
     $('#login-button').text('Login');
     $('#profile-panel-title').text(requireMainLogin ? 'Login' : 'Profile');
     $('#profile-name').empty();
@@ -874,6 +934,11 @@ function profileLogout() {
   localStorage.removeItem('user');
   localStorage.removeItem('pass');
   localStorage.removeItem('role');
+  clearInterval(profilePushTimer);
+  clearInterval(saveWatchTimer);
+  profilePushTimer = null;
+  saveWatchTimer = null;
+  lastSaveWatchSignature = null;
   updateLoginState();
   setProfileStatus('Logged out.');
 }
@@ -1028,6 +1093,7 @@ async function pullServerProfile(silent) {
     if (!$('#favorites-panel').hasClass('hidden')) {
       renderFavoritesPanel();
     }
+    await watchLocalSaveChanges(true);
     if (!silent) {
       alert('Pulled from server');
       window.location.reload();
@@ -1068,11 +1134,11 @@ async function pushServerProfile(silent) {
   }
   profilePushInFlight = false;
 }
-function queueProfilePush() {
+function queueProfilePush(forceImmediate) {
   if (!localStorage.getItem('user') || !localStorage.getItem('pass')) {
     return;
   }
-  if (window.location.hash !== '#game' && document.visibilityState === 'visible') {
+  if (!forceImmediate && window.location.hash !== '#game' && document.visibilityState === 'visible') {
     setProfileStatus('Saved locally. Use Push to Server to sync now.');
     return;
   }
@@ -1090,6 +1156,12 @@ function scheduleProfileAutoPush() {
       pushServerProfile(true);
     }
   }, 300000);
+  if (!saveWatchTimer) {
+    watchLocalSaveChanges(true);
+    saveWatchTimer = setInterval(function() {
+      watchLocalSaveChanges(false);
+    }, 15000);
+  }
 }
 function readFavoriteRecord(button, favoriteId) {
   var $button = $(button);

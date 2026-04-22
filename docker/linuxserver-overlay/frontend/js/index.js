@@ -855,10 +855,8 @@ function updateLoginState() {
     scheduleProfileAutoPush();
   } else {
     clearInterval(profilePushTimer);
-    clearInterval(saveWatchTimer);
     profilePushTimer = null;
-    saveWatchTimer = null;
-    lastSaveWatchSignature = null;
+    stopSaveWatchTimer();
     $('#login-button').text('Login');
     $('#profile-panel-title').text(requireMainLogin ? 'Login' : 'Profile');
     $('#profile-name').empty();
@@ -935,10 +933,8 @@ function profileLogout() {
   localStorage.removeItem('pass');
   localStorage.removeItem('role');
   clearInterval(profilePushTimer);
-  clearInterval(saveWatchTimer);
   profilePushTimer = null;
-  saveWatchTimer = null;
-  lastSaveWatchSignature = null;
+  stopSaveWatchTimer();
   updateLoginState();
   setProfileStatus('Logged out.');
 }
@@ -1147,6 +1143,21 @@ function queueProfilePush(forceImmediate) {
     pushServerProfile(true);
   }, 2000);
 }
+function startSaveWatchTimer(forceBaseline) {
+  if (saveWatchTimer || !localStorage.getItem('user') || !localStorage.getItem('pass')) {
+    return;
+  }
+  watchLocalSaveChanges(forceBaseline !== false);
+  saveWatchTimer = setInterval(function() {
+    watchLocalSaveChanges(false);
+  }, 15000);
+}
+function stopSaveWatchTimer() {
+  clearInterval(saveWatchTimer);
+  saveWatchTimer = null;
+  saveWatchInFlight = false;
+  lastSaveWatchSignature = null;
+}
 function scheduleProfileAutoPush() {
   if (profilePushTimer || !localStorage.getItem('user') || !localStorage.getItem('pass')) {
     return;
@@ -1156,12 +1167,6 @@ function scheduleProfileAutoPush() {
       pushServerProfile(true);
     }
   }, 300000);
-  if (!saveWatchTimer) {
-    watchLocalSaveChanges(true);
-    saveWatchTimer = setInterval(function() {
-      watchLocalSaveChanges(false);
-    }, 15000);
-  }
 }
 function readFavoriteRecord(button, favoriteId) {
   var $button = $(button);
@@ -1643,13 +1648,14 @@ function launch(active_item) {
     EJS_gameName = gameSaveName;
     EJS_core = emulator;
     EJS_pathtodata = 'data/';
-    var previousGameStart = EJS_onGameStart;
-    EJS_onGameStart = function() {
-      if (typeof previousGameStart === 'function') {
-        previousGameStart();
-      }
-      installQuickSaveMirror(gameSaveName);
-    };
+      var previousGameStart = EJS_onGameStart;
+      EJS_onGameStart = function() {
+        if (typeof previousGameStart === 'function') {
+          previousGameStart();
+        }
+        installQuickSaveMirror(gameSaveName);
+        startSaveWatchTimer(true);
+      };
     // Load touch screen interface
     if ((! EJSemu) && (window.orientation !== undefined) && localStorage.getItem('touchpad') !== 'false' && !navigator.getGamepads()?.[0]) {
       // Determine type to render

@@ -868,10 +868,13 @@ io.on('connection', async function (socket) {
     romData.file = file;
     let shaFile = hashPath + dir + '/roms/' + file + '.sha1';
     romData.scanFlag = fs.existsSync(shaFile);
-    let hash = await fsw.readFile(shaFile, 'utf8');
+    let hash = '';
+    if (romData.scanFlag) {
+      hash = await fsw.readFile(shaFile, 'utf8');
+    }
     romData.hash = hash;
     let metaData = await getMeta(dir);
-    if (metaData.hasOwnProperty(hash)) {
+    if (hash && metaData.hasOwnProperty(hash)) {
       if (metaData[hash].hasOwnProperty('ref')) {
         romData.metadata = metaData[metaData[hash].ref];
         if (metaData[hash].hasOwnProperty('name')) {

@@ -1639,6 +1639,49 @@ function launch(active_item) {
     // Add game window
     var gameDiv = $('<div>').attr('id','game');
     $('body').append(gameDiv);
+    window.EJS_showLaunchError = function(message) {
+      var target = document.getElementById('loading') || document.getElementById('game') || document.body;
+      if (!target) {
+        return;
+      }
+      var details = document.getElementById('launch-error-details');
+      if (!details) {
+        details = document.createElement('pre');
+        details.id = 'launch-error-details';
+        details.style.whiteSpace = 'pre-wrap';
+        details.style.color = '#ff8a8a';
+        details.style.padding = '12px';
+        details.style.margin = '16px';
+        details.style.maxWidth = '960px';
+        details.style.fontSize = '16px';
+        details.style.lineHeight = '1.4';
+        details.style.background = 'rgba(0,0,0,0.65)';
+        details.style.border = '1px solid rgba(255,138,138,0.5)';
+        if (target.id === 'loading') {
+          target.appendChild(details);
+        } else {
+          target.prepend(details);
+        }
+      }
+      details.textContent = String(message || 'Unknown launch error');
+    };
+    window.onerror = function(message, source, lineno, colno, error) {
+      var text = 'Launch error: ' + message;
+      if (source) {
+        text += '\nSource: ' + source + ':' + lineno + ':' + colno;
+      }
+      if (error && error.stack) {
+        text += '\n' + error.stack;
+      }
+      console.log(text);
+      window.EJS_showLaunchError(text);
+    };
+    window.onunhandledrejection = function(event) {
+      var reason = event && event.reason ? event.reason : 'Unknown promise rejection';
+      var text = 'Launch promise rejection: ' + (reason && reason.stack ? reason.stack : reason);
+      console.log(text);
+      window.EJS_showLaunchError(text);
+    };
     // Set emulator variables
     if (bios !== 'user/' + path + '/bios/') {
       EJS_biosUrl = bios;
@@ -1683,6 +1726,9 @@ function launch(active_item) {
     // Load in EJS loader
     var loaderscript = document.createElement('script');
     loaderscript.src = script;
+    loaderscript.onerror = function() {
+      window.EJS_showLaunchError('Failed to load startup script: ' + script);
+    };
     document.head.append(loaderscript);
     // Click play button as soon as it appears
     if (EJSemu) {

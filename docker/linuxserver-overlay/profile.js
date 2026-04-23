@@ -13,16 +13,16 @@ var https = require('https');
 // Default vars
 var error = {status: 'error'};
 var settingsFile = home + '/profile/settings.json';
-app.use(express.json({ limit: '500MB' }));
+var authAttempts = new Map();
+var forgotPasswordAttempts = new Map();
+var RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
+var AUTH_ATTEMPT_LIMIT = 20;
+var FORGOT_PASSWORD_LIMIT = 5;
+var USERNAME_REGEX = /^[A-Za-z0-9._-]{3,32}$/;
+app.use(express.json({ limit: '150MB' }));
 
 function roleFor(profileRecord) {
-  if (profileRecord.role) {
-    return profileRecord.role;
-  }
-  if (profileRecord.username == 'eugene') {
-    return 'admin';
-  }
-  return 'user';
+  return profileRecord && profileRecord.role === 'admin' ? 'admin' : 'user';
 }
 
 function defaultSettings() {
@@ -31,7 +31,35 @@ function defaultSettings() {
 
 async function readProfiles() {
   let profileJson = await fsw.readFile(home + '/profile/profile.json', 'utf8');
-  return JSON.parse(profileJson);
+  let profiles = JSON.parse(profileJson);
+  let changed = false;
+  let hasAdmin = Object.keys(profiles).some(function(userHash) {
+    return profiles[userHash] && profiles[userHash].role === 'admin';
+  });
+  if (!hasAdmin) {
+    let fallbackHash = Object.keys(profiles).find(function(userHash) {
+      return profiles[userHash] && profiles[userHash].username === 'eugene';
+    }) || Object.keys(profiles)[0];
+    if (fallbackHash && profiles[fallbackHash]) {
+      profiles[fallbackHash].role = 'admin';
+      changed = true;
+    }
+  }
+  for (let userHash of Object.keys(profiles)) {
+    if (!profiles[userHash] || !profiles[userHash].username) {
+      delete profiles[userHash];
+      changed = true;
+      continue;
+    }
+    if (profiles[userHash].role !== 'admin' && profiles[userHash].role !== 'user') {
+      profiles[userHash].role = 'user';
+      changed = true;
+    }
+  }
+  if (changed) {
+    await writeProfiles(profiles);
+  }
+  return profiles;
 }
 
 async function writeProfiles(profile) {
@@ -54,6 +82,20 @@ function hashProfile(user, pass) {
   return crypto.createHash('sha256').update(user + pass).digest('hex');
 }
 
+function isValidUsername(username) {
+  let value = String(username || '');
+  if (!USERNAME_REGEX.test(value)) {
+    return false;
+  }
+  let lower = value.toLowerCase();
+  return lower !== 'default' && lower !== '.history' && lower !== 'history';
+}
+
+function isStrongPassword(password) {
+  let value = String(password || '');
+  return value.length >= 10;
+}
+
 function findUserHash(profile, username) {
   for (let userHash of Object.keys(profile)) {
     if (profile[userHash].username == username) {
@@ -64,13 +106,62 @@ function findUserHash(profile, username) {
 }
 
 function requestIp(req) {
-  return req.headers['cf-connecting-ip'] || req.headers['x-real-ip'] || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '';
+  let forwardedFor = String(req.headers['cf-connecting-ip'] || req.headers['x-real-ip'] || req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+  return forwardedFor || req.socket.remoteAddress || '';
+}
+
+function consumeRateLimit(map, key, limit, windowMs) {
+  let now = Date.now();
+  let history = (map.get(key) || []).filter(function(timestamp) {
+    return now - timestamp < windowMs;
+  });
+  if (history.length >= limit) {
+    map.set(key, history);
+    return false;
+  }
+  history.push(now);
+  map.set(key, history);
+  return true;
+}
+
+function originFromValue(value) {
+  if (!value) {
+    return null;
+  }
+  try {
+    let parsed = new URL(value);
+    return parsed.origin;
+  } catch (e) {
+    return null;
+  }
+}
+
+function requestOrigin(req) {
+  return originFromValue(req.headers.origin) || originFromValue(req.headers.referer);
+}
+
+function expectedOrigin(req) {
+  let protoHeader = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim();
+  let proto = protoHeader || (req.socket.encrypted ? 'https' : 'http');
+  return proto + '://' + req.headers.host;
+}
+
+function isTrustedOrigin(req) {
+  let origin = requestOrigin(req);
+  if (!origin) {
+    return true;
+  }
+  return origin === expectedOrigin(req);
 }
 
 function sendWebhook(url, payload) {
   return new Promise(function(resolve, reject) {
     try {
       let parsed = new URL(url);
+      if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+        reject(new Error('Unsupported webhook protocol'));
+        return;
+      }
       let body = JSON.stringify(payload);
       let client = parsed.protocol === 'https:' ? https : http;
       let request = client.request({
@@ -168,12 +259,16 @@ app.get('/*', function(req, res) {
 // Catch all for any post
 app.post('/*', async function(req, res) {
   try {
-    let type = req.body.type;
-    // Send default profile unauthenticated
-    if (type == 'publicsettings') {
-      let settings = await readSettings();
-      res.json({status: 'success', requireLogin: settings.requireLogin === true});
-    } else if (type == 'default') {
+      let type = req.body.type;
+      if (!isTrustedOrigin(req)) {
+        res.status(403).json(error);
+        return;
+      }
+      // Send default profile unauthenticated
+      if (type == 'publicsettings') {
+        let settings = await readSettings();
+        res.json({status: 'success', requireLogin: settings.requireLogin === true});
+      } else if (type == 'default') {
       try {
         let profilePath = home + '/profile/default/';
         let zip = new JSZip();
@@ -203,12 +298,16 @@ app.post('/*', async function(req, res) {
         console.log(e);
         res.json(error);
       }
-    } else {
-      if (type == 'forgotpassword') {
-        if (!req.body.user) {
-          res.json(error);
-          return;
-        }
+      } else {
+        if (type == 'forgotpassword') {
+          if (!consumeRateLimit(forgotPasswordAttempts, requestIp(req), FORGOT_PASSWORD_LIMIT, RATE_LIMIT_WINDOW_MS)) {
+            res.status(429).json(error);
+            return;
+          }
+          if (!req.body.user) {
+            res.json(error);
+            return;
+          }
         let settings = await readSettings();
         if (!settings.passwordResetWebhook) {
           res.json(error);
@@ -230,10 +329,14 @@ app.post('/*', async function(req, res) {
         let sent = await sendWebhook(settings.passwordResetWebhook, payload);
         res.json(sent ? {status: 'success'} : error);
         return;
-      }
-      let auth = req.body.user + req.body.pass;
-      // Simple hash auth
-      let hash = crypto.createHash('sha256').update(auth).digest('hex');
+        }
+        if (type == 'login' && !consumeRateLimit(authAttempts, requestIp(req), AUTH_ATTEMPT_LIMIT, RATE_LIMIT_WINDOW_MS)) {
+          res.status(429).json(error);
+          return;
+        }
+        let auth = req.body.user + req.body.pass;
+        // Simple hash auth
+        let hash = crypto.createHash('sha256').update(auth).digest('hex');
       let profile = await readProfiles();
       if (profile.hasOwnProperty(hash)) {
         let currentRole = roleFor(profile[hash]);
@@ -257,8 +360,15 @@ app.post('/*', async function(req, res) {
           }
           let target = req.body.target;
           let role = req.body.role == 'admin' ? 'admin' : 'user';
+          let adminCount = Object.keys(profile).filter(function(userHash) {
+            return roleFor(profile[userHash]) === 'admin';
+          }).length;
           for await (let userHash of Object.keys(profile)) {
             if (profile[userHash].username == target) {
+              if (role !== 'admin' && roleFor(profile[userHash]) === 'admin' && adminCount <= 1) {
+                res.json(error);
+                return;
+              }
               profile[userHash].role = role;
             }
           }
@@ -266,7 +376,7 @@ app.post('/*', async function(req, res) {
           res.json({status: 'success'});
         } else if (type == 'changepassword') {
           let newPass = req.body.newPass;
-          if (!newPass) {
+          if (!isStrongPassword(newPass)) {
             res.json(error);
             return;
           }
@@ -287,7 +397,7 @@ app.post('/*', async function(req, res) {
           }
           let targetHash = findUserHash(profile, req.body.target);
           let newPass = req.body.newPass;
-          if (!targetHash || !newPass) {
+          if (!targetHash || !isStrongPassword(newPass)) {
             res.json(error);
             return;
           }
@@ -305,7 +415,7 @@ app.post('/*', async function(req, res) {
           let newUser = req.body.newUser;
           let newPass = req.body.newPass;
           let newRole = req.body.role == 'admin' ? 'admin' : 'user';
-          if (!newUser || !newPass || /[\/\\]/.test(newUser)) {
+          if (!isValidUsername(newUser) || !isStrongPassword(newPass) || findUserHash(profile, newUser)) {
             res.json(error);
             return;
           }

@@ -51,7 +51,6 @@ async function authenticateAdmin(user, pass, silent) {
       return;
     }
     localStorage.setItem('user', user);
-    localStorage.setItem('pass', pass);
     localStorage.setItem('role', result.role);
     socket.emit('adminauth', {user: user, pass: pass});
   } catch(e) {
@@ -88,7 +87,6 @@ function adminLogout() {
   adminReady = false;
   fetch(adminEndpoint('adminlogout'), {method: 'POST'}).catch(function() {});
   localStorage.removeItem('user');
-  localStorage.removeItem('pass');
   localStorage.removeItem('role');
   $('body').addClass('admin-locked');
   $('#side').empty();
@@ -117,8 +115,6 @@ $(function() {
     authenticateAdmin($('#admin-login-user').val(), $('#admin-login-pass').val(), false);
   });
   $('#admin-login-user').val(localStorage.getItem('user') || '');
-  $('#admin-login-pass').val(localStorage.getItem('pass') || '');
-  authenticateAdmin(localStorage.getItem('user'), localStorage.getItem('pass'), true);
 });
 
 //// Socket recieves ////

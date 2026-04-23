@@ -77,6 +77,11 @@ var retroArchCfg = `
 input_menu_toggle_gamepad_combo = 3
 system_directory = /home/web_user/retroarch/system/`
 var adminSessions = new Map();
+var adminAuthAttempts = new Map();
+var socketAdminAuthAttempts = new Map();
+var RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
+var ADMIN_AUTH_LIMIT = 15;
+var USERNAME_REGEX = /^[A-Za-z0-9._-]{3,32}$/;
 
 function rescanFlagPath(dir, file) {
   return hashPath + dir + '/rescan/' + encodeURIComponent(file) + '.rescan';
@@ -166,18 +171,40 @@ async function autoIdentifyPreferredRegion(dir, preferredRegion) {
 }
 
 function roleFor(profileRecord) {
-  if (profileRecord.role) {
-    return profileRecord.role;
-  }
-  if (profileRecord.username == 'eugene') {
-    return 'admin';
-  }
-  return 'user';
+  return profileRecord && profileRecord.role === 'admin' ? 'admin' : 'user';
 }
 
 async function readProfiles() {
   let profilesData = await fsw.readFile(home + '/profile/profile.json', 'utf8');
-  return JSON.parse(profilesData);
+  let profiles = JSON.parse(profilesData);
+  let changed = false;
+  let hasAdmin = Object.keys(profiles).some(function(userHash) {
+    return profiles[userHash] && profiles[userHash].role === 'admin';
+  });
+  if (!hasAdmin) {
+    let fallbackHash = Object.keys(profiles).find(function(userHash) {
+      return profiles[userHash] && profiles[userHash].username === 'eugene';
+    }) || Object.keys(profiles)[0];
+    if (fallbackHash && profiles[fallbackHash]) {
+      profiles[fallbackHash].role = 'admin';
+      changed = true;
+    }
+  }
+  for (let userHash of Object.keys(profiles)) {
+    if (!profiles[userHash] || !profiles[userHash].username) {
+      delete profiles[userHash];
+      changed = true;
+      continue;
+    }
+    if (profiles[userHash].role !== 'admin' && profiles[userHash].role !== 'user') {
+      profiles[userHash].role = 'user';
+      changed = true;
+    }
+  }
+  if (changed) {
+    await fsw.writeFile(home + '/profile/profile.json', JSON.stringify(profiles, null, 2));
+  }
+  return profiles;
 }
 
 async function authenticateProfile(user, pass) {
@@ -202,6 +229,66 @@ function adminTokenFromRequest(req) {
     return [parts.shift(), parts.join('=')];
   }).filter(cookie => cookie[0]));
   return cookies.ejs_admin_session;
+}
+
+function consumeRateLimit(map, key, limit, windowMs) {
+  let now = Date.now();
+  let history = (map.get(key) || []).filter(function(timestamp) {
+    return now - timestamp < windowMs;
+  });
+  if (history.length >= limit) {
+    map.set(key, history);
+    return false;
+  }
+  history.push(now);
+  map.set(key, history);
+  return true;
+}
+
+function requestIp(req) {
+  let forwardedFor = String(req.headers['cf-connecting-ip'] || req.headers['x-real-ip'] || req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+  return forwardedFor || req.socket.remoteAddress || '';
+}
+
+function originFromValue(value) {
+  if (!value) {
+    return null;
+  }
+  try {
+    let parsed = new URL(value);
+    return parsed.origin;
+  } catch (e) {
+    return null;
+  }
+}
+
+function expectedOrigin(req) {
+  let protoHeader = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim();
+  let proto = protoHeader || (req.socket.encrypted ? 'https' : 'http');
+  return proto + '://' + req.headers.host;
+}
+
+function isTrustedOrigin(req) {
+  let origin = originFromValue(req.headers.origin) || originFromValue(req.headers.referer);
+  if (!origin) {
+    return true;
+  }
+  return origin === expectedOrigin(req);
+}
+
+function adminCookieFlags(req) {
+  let protoHeader = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim();
+  let isSecure = protoHeader === 'https' || (originFromValue(req.headers.origin) || '').startsWith('https://') || (originFromValue(req.headers.referer) || '').startsWith('https://');
+  return 'Path=' + baseUrl + '; SameSite=Strict; HttpOnly' + (isSecure ? '; Secure' : '');
+}
+
+function isValidUsername(username) {
+  let value = String(username || '');
+  if (!USERNAME_REGEX.test(value)) {
+    return false;
+  }
+  let lower = value.toLowerCase();
+  return lower !== 'default' && lower !== '.history' && lower !== 'history';
 }
 
 function isAdminSession(token) {
@@ -236,6 +323,14 @@ baserouter.use('/public', express.static(__dirname + '/public'));
 baserouter.use('/frontend', express.static(__dirname + '/frontend'));
 baserouter.post('/adminauth', async function(req, res) {
   try {
+    if (!isTrustedOrigin(req)) {
+      res.status(403).json({status: 'error'});
+      return;
+    }
+    if (!consumeRateLimit(adminAuthAttempts, requestIp(req), ADMIN_AUTH_LIMIT, RATE_LIMIT_WINDOW_MS)) {
+      res.status(429).json({status: 'error'});
+      return;
+    }
     let profile = await authenticateProfile(req.body.user, req.body.pass);
     if (!profile || profile.role !== 'admin') {
       res.status(403).json({status: 'error'});
@@ -243,7 +338,7 @@ baserouter.post('/adminauth', async function(req, res) {
     }
     let token = crypto.randomBytes(32).toString('hex');
     adminSessions.set(token, {user: profile.username, role: profile.role, created: Date.now()});
-    res.setHeader('Set-Cookie', 'ejs_admin_session=' + token + '; Path=' + baseUrl + '; SameSite=Lax; HttpOnly');
+    res.setHeader('Set-Cookie', 'ejs_admin_session=' + token + '; ' + adminCookieFlags(req));
     res.json({status: 'success', user: profile.username, role: profile.role});
   } catch(e) {
     console.log(e);
@@ -251,14 +346,22 @@ baserouter.post('/adminauth', async function(req, res) {
   }
 });
 baserouter.post('/adminlogout', function(req, res) {
+  if (!isTrustedOrigin(req)) {
+    res.status(403).json({status: 'error'});
+    return;
+  }
   let token = adminTokenFromRequest(req);
   if (token) {
     adminSessions.delete(token);
   }
-  res.setHeader('Set-Cookie', 'ejs_admin_session=; Path=' + baseUrl + '; SameSite=Lax; HttpOnly; Max-Age=0');
+  res.setHeader('Set-Cookie', 'ejs_admin_session=; ' + adminCookieFlags(req) + '; Max-Age=0');
   res.json({status: 'success'});
 });
 baserouter.post('/profileapi', function(req, res) {
+  if (!isTrustedOrigin(req)) {
+    res.status(403).json({status: 'error'});
+    return;
+  }
   let body = JSON.stringify(req.body || {});
   let proxy = httpModule.request({
     method: 'POST',
@@ -294,7 +397,9 @@ http.listen(3000);
 //// socketIO comms ////
 io = socketIO(http, {path: baseUrl + 'socket.io',maxHttpBufferSize: 100000000});
 io.on('connection', async function (socket) {
-  socket.adminAuthenticated = false;
+  let sessionToken = adminTokenFromRequest(socket.request || {headers: {}});
+  let existingSession = sessionToken && adminSessions.get(sessionToken);
+  socket.adminAuthenticated = isAdminSession(sessionToken);
 
   async function renderInitialAdminPage() {
     if (fs.existsSync(dataRoot + 'config/main.json')) {
@@ -810,17 +915,24 @@ io.on('connection', async function (socket) {
   async function createProfile(data) {
     let user = data[0];
     let pass = data[1];
+    if (!isValidUsername(user) || !pass || pass.length < 10) {
+      return;
+    }
     let auth = user + pass;
     // Create hash and store user in profile.json
     let hash = crypto.createHash('sha256').update(auth).digest('hex');
-    let profilesData = await fsw.readFile(home + '/profile/profile.json', 'utf8');
-    let profilesJson = JSON.parse(profilesData);
-    profilesJson[hash] = {username: user};
-    profileFile = JSON.stringify(profilesJson, null, 2);
+    let profilesJson = await readProfiles();
+    if (Object.keys(profilesJson).some(function(profileHash) {
+      return profilesJson[profileHash] && profilesJson[profileHash].username === user;
+    })) {
+      return;
+    }
+    profilesJson[hash] = {username: user, role: 'user'};
+    let profileFile = JSON.stringify(profilesJson, null, 2);
     await fsw.writeFile(home + '/profile/profile.json', profileFile);
     // Make directory for user with default config
-    await fsw.mkdir(home + '/profile/' + user);
-    await fsw.writeFile(home + '/profile/' + user + '/retroarch.cfg', retroArchCfg);
+    await fsw.mkdir(path.join(home, 'profile', user));
+    await fsw.writeFile(path.join(home, 'profile', user, 'retroarch.cfg'), retroArchCfg);
     // Tell client to render profiles
     let profiles = [];
     for await (let profile of Object.keys(profilesJson)) {
@@ -831,17 +943,25 @@ io.on('connection', async function (socket) {
 
   // Delete a profile
   async function deleteProfile(user) {
-    let profilesData = await fsw.readFile(home + '/profile/profile.json', 'utf8');
-    let profilesJson = JSON.parse(profilesData);
+    if (!isValidUsername(user)) {
+      return;
+    }
+    let profilesJson = await readProfiles();
+    let adminCount = Object.keys(profilesJson).filter(function(profileHash) {
+      return roleFor(profilesJson[profileHash]) === 'admin';
+    }).length;
     for await (let profile of Object.keys(profilesJson)) {
       if (profilesJson[profile].username == user) {
+        if (roleFor(profilesJson[profile]) === 'admin' && adminCount <= 1) {
+          return;
+        }
         delete profilesJson[profile];
       }
     }
-    profileFile = JSON.stringify(profilesJson, null, 2);
+    let profileFile = JSON.stringify(profilesJson, null, 2);
     await fsw.writeFile(home + '/profile/profile.json', profileFile);
     if (user !== 'default') {
-      await fsw.rm(home + '/profile/' + user, { recursive: true, force: true });
+      await fsw.rm(path.join(home, 'profile', user), { recursive: true, force: true });
     }
     let profiles = [];
     for await (let profile of Object.keys(profilesJson)) {
@@ -999,8 +1119,16 @@ io.on('connection', async function (socket) {
   }
 
   // Incoming socket requests
+  if (socket.adminAuthenticated && existingSession) {
+    socket.emit('adminauth', {status: 'success', user: existingSession.user, role: existingSession.role});
+    await renderInitialAdminPage();
+  }
   socket.on('adminauth', async function(data) {
     try {
+      if (!consumeRateLimit(socketAdminAuthAttempts, socket.handshake.address || 'unknown', ADMIN_AUTH_LIMIT, RATE_LIMIT_WINDOW_MS)) {
+        socket.emit('adminauth', {status: 'error'});
+        return;
+      }
       let profile = await authenticateProfile(data.user, data.pass);
       if (!profile || profile.role !== 'admin') {
         socket.emit('adminauth', {status: 'error'});

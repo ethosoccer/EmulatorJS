@@ -151,7 +151,14 @@ function isTrustedOrigin(req) {
   if (!origin) {
     return true;
   }
-  return origin === expectedOrigin(req);
+  let expected = expectedOrigin(req);
+  let originUrl = new URL(origin);
+  let expectedUrl = new URL(expected);
+  if (originUrl.host !== expectedUrl.host) {
+    return false;
+  }
+  let hasForwardedProto = String(req.headers['x-forwarded-proto'] || '').trim().length > 0 || !!req.socket.encrypted;
+  return !hasForwardedProto || originUrl.protocol === expectedUrl.protocol;
 }
 
 function sendWebhook(url, payload) {

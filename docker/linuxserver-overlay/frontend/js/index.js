@@ -1639,6 +1639,47 @@ function launch(active_item) {
     // Add game window
     var gameDiv = $('<div>').attr('id','game');
     $('body').append(gameDiv);
+    var launchGlobalTarget = typeof globalThis !== 'undefined' ? globalThis : window;
+    var hiddenLaunchGlobals = {
+      process: launchGlobalTarget.process,
+      module: launchGlobalTarget.module,
+      exports: launchGlobalTarget.exports,
+      require: launchGlobalTarget.require
+    };
+    function restoreLaunchGlobals() {
+      try {
+        if (typeof hiddenLaunchGlobals.process === 'undefined') {
+          delete launchGlobalTarget.process;
+        } else {
+          launchGlobalTarget.process = hiddenLaunchGlobals.process;
+        }
+        if (typeof hiddenLaunchGlobals.module === 'undefined') {
+          delete launchGlobalTarget.module;
+        } else {
+          launchGlobalTarget.module = hiddenLaunchGlobals.module;
+        }
+        if (typeof hiddenLaunchGlobals.exports === 'undefined') {
+          delete launchGlobalTarget.exports;
+        } else {
+          launchGlobalTarget.exports = hiddenLaunchGlobals.exports;
+        }
+        if (typeof hiddenLaunchGlobals.require === 'undefined') {
+          delete launchGlobalTarget.require;
+        } else {
+          launchGlobalTarget.require = hiddenLaunchGlobals.require;
+        }
+      } catch (e) {
+        console.log('Unable to restore launch globals', e);
+      }
+    }
+    try {
+      launchGlobalTarget.process = undefined;
+      launchGlobalTarget.module = undefined;
+      launchGlobalTarget.exports = undefined;
+      launchGlobalTarget.require = undefined;
+    } catch (e) {
+      console.log('Unable to hide Node-like globals during launch', e);
+    }
     window.EJS_showLaunchError = function(message) {
       var target = document.getElementById('loading') || document.getElementById('game') || document.body;
       if (!target) {
@@ -1675,12 +1716,14 @@ function launch(active_item) {
       }
       console.log(text);
       window.EJS_showLaunchError(text);
+      restoreLaunchGlobals();
     };
     window.onunhandledrejection = function(event) {
       var reason = event && event.reason ? event.reason : 'Unknown promise rejection';
       var text = 'Launch promise rejection: ' + (reason && reason.stack ? reason.stack : reason);
       console.log(text);
       window.EJS_showLaunchError(text);
+      restoreLaunchGlobals();
     };
     // Set emulator variables
     if (bios !== 'user/' + path + '/bios/') {
@@ -1696,6 +1739,7 @@ function launch(active_item) {
         if (typeof previousGameStart === 'function') {
           previousGameStart();
         }
+        restoreLaunchGlobals();
         installQuickSaveMirror(gameSaveName);
         startSaveWatchTimer(true);
       };
@@ -1727,6 +1771,7 @@ function launch(active_item) {
     var loaderscript = document.createElement('script');
     loaderscript.src = script;
     loaderscript.onerror = function() {
+      restoreLaunchGlobals();
       window.EJS_showLaunchError('Failed to load startup script: ' + script);
     };
     document.head.append(loaderscript);

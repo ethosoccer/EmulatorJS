@@ -136,6 +136,27 @@ function profileRequest(body) {
     body: JSON.stringify(body)
   });
 }
+function notifyGameStarted(details) {
+  if (!localStorage.getItem('user') || !localStorage.getItem('pass')) {
+    return Promise.resolve();
+  }
+  return profileRequest({
+    type: 'notifygameevent',
+    user: localStorage.getItem('user'),
+    pass: localStorage.getItem('pass'),
+    source: 'frontend',
+    gameName: details && details.gameName || '',
+    gameFile: details && details.gameFile || '',
+    console: details && details.console || '',
+    consoleTitle: details && details.consoleTitle || '',
+    path: details && details.path || '',
+    emulator: details && details.emulator || '',
+    romExtension: details && details.romExtension || '',
+    gameUrl: details && details.gameUrl || ''
+  }).catch(function(e) {
+    console.log('Unable to notify game start', e);
+  });
+}
 function freshJsonUrl(url) {
   var separator = url.indexOf('?') === -1 ? '?' : '&';
   return url + separator + 'v=' + configCacheToken;
@@ -889,7 +910,7 @@ async function profileLogin() {
   $('#profile-pass').val('');
   setProfileStatus('Logging in...');
   try {
-    var res = await profileRequest({user:user, pass:pass, type:'login'});
+    var res = await profileRequest({user:user, pass:pass, type:'login', source:'frontend-profile'});
     var json = await res.json();
     if (json.status == 'success') {
       localStorage.setItem('user', json.user);
@@ -913,7 +934,7 @@ async function verifyStoredProfileLogin() {
     return;
   }
   try {
-    var res = await profileRequest({user:localStorage.getItem('user'), pass:localStorage.getItem('pass'), type:'login'});
+    var res = await profileRequest({user:localStorage.getItem('user'), pass:localStorage.getItem('pass'), type:'login', source:'frontend-verify', silent:true});
     var json = await res.json();
     if (json.status == 'success') {
       localStorage.setItem('user', json.user);
@@ -1634,6 +1655,7 @@ function launch(active_item) {
     var rom_extension = selected.data('rom_extension');
     var gameSaveName = name + rom_extension;
     var bios = 'user/' + path + '/bios/' + selected.data('bios');
+    var gameConsoleTitle = $('#menu').data('config') && $('#menu').data('config').title ? $('#menu').data('config').title : root;
     // Clear screen
     $('body').empty();
     // Add game window
@@ -1740,6 +1762,16 @@ function launch(active_item) {
           previousGameStart();
         }
         restoreLaunchGlobals();
+        notifyGameStarted({
+          gameName: name,
+          gameFile: gameSaveName,
+          console: root,
+          consoleTitle: gameConsoleTitle,
+          path: path,
+          emulator: emulator,
+          romExtension: rom_extension,
+          gameUrl: EJS_gameUrl
+        });
         installQuickSaveMirror(gameSaveName);
         startSaveWatchTimer(true);
       };

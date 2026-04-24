@@ -199,6 +199,38 @@ function sendWebhook(url, payload) {
   });
 }
 
+function requestMetadata(req) {
+  return {
+    time: new Date().toISOString(),
+    ip: requestIp(req),
+    forwardedFor: req.headers['x-forwarded-for'] || '',
+    userAgent: req.headers['user-agent'] || '',
+    host: req.headers.host || '',
+    origin: req.headers.origin || '',
+    referer: req.headers.referer || '',
+    requestPath: req.originalUrl || req.url || ''
+  };
+}
+
+async function emitConfiguredWebhook(settings, payload) {
+  if (!settings || !settings.passwordResetWebhook) {
+    return false;
+  }
+  try {
+    return await sendWebhook(settings.passwordResetWebhook, payload);
+  } catch (e) {
+    console.log('Webhook send failed', e);
+    return false;
+  }
+}
+
+async function emitActivityWebhook(settings, req, payload) {
+  let basePayload = Object.assign({
+    app: 'EmulatorJS'
+  }, requestMetadata(req), payload || {});
+  return await emitConfiguredWebhook(settings, basePayload);
+}
+
 function profilePathForUser(username) {
   return path.join(home, 'profile', username);
 }
@@ -325,19 +357,24 @@ app.post('/*', async function(req, res) {
           event: 'password_reset_requested',
           requestedUser: req.body.user || '',
           source: req.body.source || 'unknown',
-          time: new Date().toISOString(),
-          ip: requestIp(req),
-          forwardedFor: req.headers['x-forwarded-for'] || '',
-          userAgent: req.headers['user-agent'] || '',
-          host: req.headers.host || '',
-          origin: req.headers.origin || '',
-          referer: req.headers.referer || ''
         };
-        let sent = await sendWebhook(settings.passwordResetWebhook, payload);
+        let sent = await emitActivityWebhook(settings, req, payload);
         res.json(sent ? {status: 'success'} : error);
         return;
         }
         if (type == 'login' && !consumeRateLimit(authAttempts, requestIp(req), AUTH_ATTEMPT_LIMIT, RATE_LIMIT_WINDOW_MS)) {
+          if (req.body.silent !== true) {
+            let settings = await readSettings();
+            await emitActivityWebhook(settings, req, {
+              title: 'EmulatorJS login throttled',
+              event: 'login_throttled',
+              action: 'login',
+              status: 'blocked',
+              username: req.body.user || '',
+              source: req.body.source || 'unknown',
+              reason: 'rate_limited'
+            });
+          }
           res.status(429).json(error);
           return;
         }
@@ -349,7 +386,41 @@ app.post('/*', async function(req, res) {
         let currentRole = roleFor(profile[hash]);
         // Return username if found
         if (type == 'login') {
+          if (req.body.silent !== true) {
+            let settings = await readSettings();
+            await emitActivityWebhook(settings, req, {
+              title: 'EmulatorJS login succeeded',
+              event: 'login_success',
+              action: 'login',
+              status: 'success',
+              username: profile[hash].username,
+              role: currentRole,
+              source: req.body.source || 'unknown'
+            });
+          }
           res.json({status: 'success', user: profile[hash].username, role: currentRole});
+        } else if (type == 'notifygameevent') {
+          let settings = await readSettings();
+          await emitActivityWebhook(settings, req, {
+            title: 'EmulatorJS game started',
+            event: 'game_started',
+            action: 'game_start',
+            status: 'success',
+            username: profile[hash].username,
+            role: currentRole,
+            source: req.body.source || 'frontend',
+            game: {
+              name: req.body.gameName || '',
+              file: req.body.gameFile || '',
+              console: req.body.console || '',
+              consoleTitle: req.body.consoleTitle || '',
+              path: req.body.path || '',
+              emulator: req.body.emulator || '',
+              romExtension: req.body.romExtension || '',
+              url: req.body.gameUrl || ''
+            }
+          });
+          res.json({status: 'success'});
         } else if (type == 'listusers') {
           if (currentRole !== 'admin') {
             res.json(error);
@@ -465,10 +536,6 @@ app.post('/*', async function(req, res) {
             title: 'EmulatorJS password reset webhook test',
             event: 'password_reset_webhook_test',
             requestedBy: profile[hash].username,
-            time: new Date().toISOString(),
-            ip: requestIp(req),
-            userAgent: req.headers['user-agent'] || '',
-            host: req.headers.host || ''
           });
           res.json(sent ? {status: 'success'} : error);
         } else if (type == 'listprofilesaves') {
@@ -593,6 +660,17 @@ app.post('/*', async function(req, res) {
           res.json(error);
         }
       } else {
+        if (type == 'login' && req.body.silent !== true) {
+          let settings = await readSettings();
+          await emitActivityWebhook(settings, req, {
+            title: 'EmulatorJS login failed',
+            event: 'login_failed',
+            action: 'login',
+            status: 'failed',
+            username: req.body.user || '',
+            source: req.body.source || 'unknown'
+          });
+        }
         res.json(error);
       }
     }

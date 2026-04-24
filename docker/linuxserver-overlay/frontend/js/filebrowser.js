@@ -393,7 +393,7 @@ async function loadProfile() {
 async function verifyLogin() {
   try {
     let loginSettings = postSettings;
-    loginSettings.body = JSON.stringify({user:localStorage.getItem('user'),pass:localStorage.getItem('pass'),type:'login'});
+    loginSettings.body = JSON.stringify({user:localStorage.getItem('user'),pass:localStorage.getItem('pass'),type:'login',source:'filebrowser-verify',silent:true});
     let res = await fetch(endPoint,loginSettings);
     let json = await res.json();
     if (json.status == 'success') {
@@ -416,7 +416,7 @@ async function login() {
     $('#user').val('');
     $('#pass').val('');
     let loginSettings = postSettings;
-    loginSettings.body = JSON.stringify({user:user,pass:pass,type:'login'});
+    loginSettings.body = JSON.stringify({user:user,pass:pass,type:'login',source:'filebrowser'});
     let res = await fetch(endPoint,loginSettings);
     let json = await res.json();
     if (json.status == 'success') {

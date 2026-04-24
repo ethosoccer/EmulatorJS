@@ -14,6 +14,7 @@ var baserouter = express.Router();
 var { spawn } = require('child_process');
 var { create } = require('ipfs-http-client');
 var crypto = require('crypto');
+var https = require('https');
 var ipfs = create();
 var merge = require('deepmerge');
 
@@ -82,6 +83,7 @@ var socketAdminAuthAttempts = new Map();
 var RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
 var ADMIN_AUTH_LIMIT = 15;
 var USERNAME_REGEX = /^[A-Za-z0-9._-]{3,32}$/;
+var settingsFile = home + '/profile/settings.json';
 
 function rescanFlagPath(dir, file) {
   return hashPath + dir + '/rescan/' + encodeURIComponent(file) + '.rescan';
@@ -222,6 +224,18 @@ async function authenticateProfile(user, pass) {
   };
 }
 
+function defaultSettings() {
+  return {requireLogin: false, passwordResetWebhook: ''};
+}
+
+async function readSettings() {
+  try {
+    return Object.assign(defaultSettings(), JSON.parse(await fsw.readFile(settingsFile, 'utf8')));
+  } catch(e) {
+    return defaultSettings();
+  }
+}
+
 function adminTokenFromRequest(req) {
   let cookieHeader = req.headers.cookie || '';
   let cookies = Object.fromEntries(cookieHeader.split(';').map(cookie => {
@@ -289,6 +303,63 @@ function adminCookieFlags(req) {
   return 'Path=' + baseUrl + '; SameSite=Strict; HttpOnly' + (isSecure ? '; Secure' : '');
 }
 
+function sendWebhook(url, payload) {
+  return new Promise(function(resolve, reject) {
+    try {
+      let parsed = new URL(url);
+      let body = JSON.stringify(payload);
+      let client = parsed.protocol === 'https:' ? https : httpModule;
+      let request = client.request({
+        method: 'POST',
+        hostname: parsed.hostname,
+        port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
+        path: parsed.pathname + parsed.search,
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(body)
+        },
+        timeout: 10000
+      }, function(response) {
+        response.resume();
+        response.on('end', function() {
+          resolve(response.statusCode >= 200 && response.statusCode < 300);
+        });
+      });
+      request.on('timeout', function() {
+        request.destroy(new Error('Webhook timed out'));
+      });
+      request.on('error', reject);
+      request.write(body);
+      request.end();
+    } catch(e) {
+      reject(e);
+    }
+  });
+}
+
+async function emitActivityWebhook(req, payload) {
+  let settings = await readSettings();
+  if (!settings.passwordResetWebhook) {
+    return false;
+  }
+  try {
+    return await sendWebhook(settings.passwordResetWebhook, Object.assign({
+      app: 'EmulatorJS',
+      time: new Date().toISOString(),
+      ip: requestIp(req),
+      forwardedFor: req.headers['x-forwarded-for'] || '',
+      userAgent: req.headers['user-agent'] || '',
+      host: req.headers.host || '',
+      origin: req.headers.origin || '',
+      referer: req.headers.referer || '',
+      requestPath: req.originalUrl || req.url || ''
+    }, payload || {}));
+  } catch (e) {
+    console.log('Webhook send failed', e);
+    return false;
+  }
+}
+
 function isValidUsername(username) {
   let value = String(username || '');
   if (!USERNAME_REGEX.test(value)) {
@@ -335,17 +406,44 @@ baserouter.post('/adminauth', async function(req, res) {
       return;
     }
     if (!consumeRateLimit(adminAuthAttempts, requestIp(req), ADMIN_AUTH_LIMIT, RATE_LIMIT_WINDOW_MS)) {
+      await emitActivityWebhook(req, {
+        title: 'EmulatorJS admin login throttled',
+        event: 'admin_login_throttled',
+        action: 'admin_login',
+        status: 'blocked',
+        username: req.body.user || '',
+        source: 'admin-manager',
+        reason: 'rate_limited'
+      });
       res.status(429).json({status: 'error'});
       return;
     }
     let profile = await authenticateProfile(req.body.user, req.body.pass);
     if (!profile || profile.role !== 'admin') {
+      await emitActivityWebhook(req, {
+        title: 'EmulatorJS admin login failed',
+        event: 'admin_login_failed',
+        action: 'admin_login',
+        status: 'failed',
+        username: req.body.user || '',
+        role: profile ? profile.role : '',
+        source: 'admin-manager'
+      });
       res.status(403).json({status: 'error'});
       return;
     }
     let token = crypto.randomBytes(32).toString('hex');
     adminSessions.set(token, {user: profile.username, role: profile.role, created: Date.now()});
     res.setHeader('Set-Cookie', 'ejs_admin_session=' + token + '; ' + adminCookieFlags(req));
+    await emitActivityWebhook(req, {
+      title: 'EmulatorJS admin login succeeded',
+      event: 'admin_login_success',
+      action: 'admin_login',
+      status: 'success',
+      username: profile.username,
+      role: profile.role,
+      source: 'admin-manager'
+    });
     res.json({status: 'success', user: profile.username, role: profile.role});
   } catch(e) {
     console.log(e);

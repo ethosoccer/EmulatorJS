@@ -776,7 +776,7 @@ function renderLogsPage(payload) {
 
   var settingsCard = $('<div>').addClass('card logs-card');
   settingsCard.append($('<h3>').text('Storage & Forwarding'));
-  var settingsGrid = $('<div>').addClass('logs-filter-grid');
+  var settingsGrid = $('<div>').addClass('logs-filter-grid logs-settings-grid');
   settingsGrid.append($('<label>').text('Local logs enabled').append($('<input>').attr({id: 'localLogsEnabled', type: 'checkbox'}).prop('checked', settings.localLogsEnabled !== false)));
   settingsGrid.append($('<label>').text('Retention (days)').append($('<input>').attr({id: 'localLogRetentionDays', type: 'number', min: 1, max: 3650}).val(settings.localLogRetentionDays || 90)));
   settingsGrid.append($('<label>').text('Influx enabled').append($('<input>').attr({id: 'influxEnabled', type: 'checkbox'}).prop('checked', settings.influxEnabled === true)));

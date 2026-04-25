@@ -177,7 +177,18 @@ socket.on('influxtest', function(result) {
     $('#modal-content').append($('<h3>').text('Influx Response'));
     $('#modal-content').append($('<pre>').addClass('log-details-json').text(result.responseBody));
   }
-  $('#modal').stop(true, true).show(100);
+  showModal();
+  setTimeout(function() {
+    if (!$('#modal').is(':visible')) {
+      var fallback = [
+        ok ? 'Influx Test Succeeded' : 'Influx Test Failed',
+        result && result.message ? result.message : '',
+        result && result.statusCode ? 'HTTP Status: ' + result.statusCode : '',
+        result && result.responseBody ? 'Response: ' + result.responseBody : ''
+      ].filter(Boolean).join('\n');
+      window.alert(fallback || 'Influx test completed.');
+    }
+  }, 150);
 });
 // Render in rom data
 socket.on('romdata', renderRomData);
@@ -311,10 +322,14 @@ function emptyModal() {
   $('#modal-content').empty();
 }
 
+function showModal() {
+  $('#modal').stop(true, true).css('display', 'block');
+}
+
 // Close modal
 function closeModal() {
   emptyModal();
-  $('#modal').toggle(100)
+  $('#modal').hide()
 }
 
 // Render config file list
@@ -707,7 +722,7 @@ function openLogDetails(eventId) {
   }
   emptyModal();
   $('#modal-content').append($('<pre>').addClass('log-details-json').text(JSON.stringify(row.data('details') || {}, null, 2)));
-  $('#modal').toggle(100);
+  showModal();
 }
 
 function saveLogSettings() {

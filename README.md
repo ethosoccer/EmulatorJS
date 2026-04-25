@@ -24,6 +24,49 @@ Join our Discord server:
 
 ## Getting Started
 
+## This Fork Adds
+
+This fork is tailored for a self-hosted EmulatorJS deployment with a browser-facing game library, profile sync, admin tooling, and operational logging.
+
+### Frontend experience
+- Search, favorites, and back navigation in console views
+- Per-console filtering that scales to large libraries using virtualized game lists
+- Save-state and ROM download actions directly from the game browser
+- Default fallback video support from `data/main/videos/default.mp4` when a game-specific preview video is missing
+- Profile popup with game save browsing, save version history, and version-aware downloads
+- Automatic push-to-server when local save data changes while a user is logged in
+
+### Profiles and sync
+- Frontend login/logout with admin and user roles
+- Push/pull profile sync from the browser UI
+- Sync history preservation so pushes do not delete prior saves/configs; older versions are retained in history instead of being silently removed
+- Password reset request webhook support
+- Password change flows for admins and non-admin users
+
+### Admin and file browser
+- Modernized admin/file browser styling with light/dark mode support
+- Resizable responsive modal windows across the admin UI
+- User management, role management, and optional login gate for the main frontend
+- Protected admin and file browser surfaces with admin-only access
+- Safer destructive actions, including confirmations for ROM/file deletion paths
+
+### ROM management improvements
+- Preferred scan region per system
+- Scan flags for previously reviewed ROMs
+- Scan only new items vs scan all items
+- Searchable ROM identification workflow
+- Accessible color changes for identified vs missing artwork states
+
+### Security and observability
+- Hardened auth/session behavior for public exposure
+- Login attempt throttling and stricter origin checks on sensitive routes
+- Webhook notifications for login attempts, successful logins, password reset requests, and game launches
+- New admin `Logs` view with 90-day local retention by default
+- Optional simultaneous forwarding of the same activity events to InfluxDB v2
+
+### Deployment notes
+This fork includes a Docker-based deployment overlay in [`docker/linuxserver-overlay`](docker/linuxserver-overlay) for the self-hosted setup used in this project.
+
 ### Supported Systems
 EmulatorJS supports a wide variety of legacy consoles and arcade machines. For the complete list of supported cores, please visit our [Cores Documentation](https://emulatorjs.org/docs4devs/cores).
 

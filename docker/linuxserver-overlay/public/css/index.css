@@ -439,6 +439,26 @@ button:focus-visible {
   color: var(--muted);
 }
 
+.logs-influx-result {
+  display: block;
+  margin: 8px 0 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-soft);
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.logs-influx-result.is-success {
+  border-color: color-mix(in srgb, var(--success-text) 35%, var(--line));
+}
+
+.logs-influx-result.is-error {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--line));
+}
+
 .logs-filter-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));

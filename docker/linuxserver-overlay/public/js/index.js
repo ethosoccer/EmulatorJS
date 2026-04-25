@@ -155,40 +155,35 @@ socket.on('renderlogs', renderLogsPage);
 socket.on('influxtest', function(result) {
   var ok = result && result.status === 'success';
   $('#logs-status').text(ok ? 'Influx test event sent.' : 'Influx test failed.');
-  emptyModal();
-  $('#modal-content').append($('<h3>').text(ok ? 'Influx Test Succeeded' : 'Influx Test Failed'));
-  $('#modal-content').append($('<p>').text(result && result.message ? result.message : (ok ? 'Influx accepted the test event.' : 'Influx did not accept the test event.')));
+  var lines = [
+    ok ? 'Influx Test Succeeded' : 'Influx Test Failed',
+    result && result.message ? result.message : (ok ? 'Influx accepted the test event.' : 'Influx did not accept the test event.')
+  ];
   if (result && result.statusCode) {
-    $('#modal-content').append($('<p>').text('HTTP Status: ' + result.statusCode));
+    lines.push('HTTP Status: ' + result.statusCode);
   }
   if (result && result.influxUrl) {
-    $('#modal-content').append($('<p>').text('Influx URL: ' + result.influxUrl));
+    lines.push('Influx URL: ' + result.influxUrl);
   }
   if (result && result.influxOrg) {
-    $('#modal-content').append($('<p>').text('Org: ' + result.influxOrg));
+    lines.push('Org: ' + result.influxOrg);
   }
   if (result && result.influxBucket) {
-    $('#modal-content').append($('<p>').text('Bucket: ' + result.influxBucket));
+    lines.push('Bucket: ' + result.influxBucket);
   }
   if (result && result.requestPath) {
-    $('#modal-content').append($('<p>').text('Write Path: ' + result.requestPath));
+    lines.push('Write Path: ' + result.requestPath);
   }
   if (result && result.responseBody) {
-    $('#modal-content').append($('<h3>').text('Influx Response'));
-    $('#modal-content').append($('<pre>').addClass('log-details-json').text(result.responseBody));
+    lines.push('');
+    lines.push('Influx Response:');
+    lines.push(result.responseBody);
   }
-  showModal();
-  setTimeout(function() {
-    if (!$('#modal').is(':visible')) {
-      var fallback = [
-        ok ? 'Influx Test Succeeded' : 'Influx Test Failed',
-        result && result.message ? result.message : '',
-        result && result.statusCode ? 'HTTP Status: ' + result.statusCode : '',
-        result && result.responseBody ? 'Response: ' + result.responseBody : ''
-      ].filter(Boolean).join('\n');
-      window.alert(fallback || 'Influx test completed.');
-    }
-  }, 150);
+  $('#logs-influx-result')
+    .removeClass('is-success is-error')
+    .addClass(ok ? 'is-success' : 'is-error')
+    .text(lines.join('\n'))
+    .show();
 });
 // Render in rom data
 socket.on('romdata', renderRomData);
@@ -823,6 +818,7 @@ function renderLogsPage(payload) {
   settingsGrid.append($('<label>').text('Influx Token').append($('<input>').attr({id: 'influxToken', type: 'password', placeholder: settings.influxTokenConfigured ? 'Token configured - leave blank to keep' : 'Paste new token'})));
   settingsGrid.append($('<label>').text('Clear saved token').append($('<input>').attr({id: 'clearInfluxToken', type: 'checkbox'}).prop('checked', false)));
   settingsCard.append(settingsGrid);
+  settingsCard.append($('<pre>').attr('id', 'logs-influx-result').addClass('logs-influx-result').hide());
   settingsCard.append($('<div>').addClass('logs-inline-note').text('Webhook destination: ' + (settings.webhookConfigured ? 'configured' : 'not configured') + '. Influx token stays on the server unless you save a new one.'));
   settingsCard.append($('<div>').addClass('logs-button-row')
     .append($('<button>').addClass('button hover').attr('type', 'button').on('click', saveLogSettings).text('Save Log Settings'))

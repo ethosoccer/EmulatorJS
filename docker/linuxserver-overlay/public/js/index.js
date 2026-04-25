@@ -64,6 +64,39 @@ function formatLogTimestamp(value, timezone) {
   }
 }
 
+function formatLogIp(entry) {
+  var publicIp = entry.publicIp || entry.ip || '';
+  var localIp = entry.localIp || '';
+  var cell = $('<div>').addClass('logs-ip-cell');
+  cell.append($('<div>').text(publicIp || '-'));
+  if (localIp && localIp !== publicIp) {
+    cell.append($('<div>').addClass('logs-cell-subtle').text('Local: ' + localIp));
+  }
+  return cell;
+}
+
+function formatLogLocation(entry) {
+  var summary = entry.geoSummary || entry.geo_summary || '';
+  if (!summary && entry.details) {
+    summary = entry.details.geoSummary || '';
+  }
+  var timezone = entry.geoTimezone || entry.geo_timezone || (entry.details && entry.details.geoTimezone) || '';
+  var postal = entry.geoPostalCode || entry.geo_postal_code || (entry.details && entry.details.geoPostalCode) || '';
+  var cell = $('<div>').addClass('logs-location-cell');
+  cell.append($('<div>').text(summary || (entry.localIp || entry.ip ? 'Local network' : '-')));
+  var extra = [];
+  if (timezone) {
+    extra.push(timezone);
+  }
+  if (postal) {
+    extra.push(postal);
+  }
+  if (extra.length) {
+    cell.append($('<div>').addClass('logs-cell-subtle').text(extra.join(' · ')));
+  }
+  return cell;
+}
+
 function changeLogTimezone() {
   var selected = $('#logTimezone').val() || browserTimezone || 'UTC';
   logTimezone = selected;
@@ -931,11 +964,12 @@ function renderLogsPage(payload) {
     .append($('<th>').text('User'))
     .append($('<th>').text('Source'))
     .append($('<th>').text('IP'))
+    .append($('<th>').text('Location'))
     .append($('<th>').text('Game / Details'))
     .append($('<th>').text('View'))));
   var body = $('<tbody>');
   if (!events.length) {
-    body.append($('<tr>').append($('<td>').attr('colspan', 7).addClass('logs-empty').text('No events matched the current filters.')));
+    body.append($('<tr>').append($('<td>').attr('colspan', 8).addClass('logs-empty').text('No events matched the current filters.')));
   } else {
     $.each(events, function(index, entry) {
       var row = $('<tr>').attr('id', 'log-row-' + entry.id);
@@ -943,7 +977,8 @@ function renderLogsPage(payload) {
       row.append($('<td>').text((entry.title || entry.event_type || 'Event') + (entry.status ? ' (' + entry.status + ')' : '')));
       row.append($('<td>').text(entry.username || '-'));
       row.append($('<td>').text(entry.source || '-'));
-      row.append($('<td>').text(entry.ip || '-'));
+      row.append($('<td>').append(formatLogIp(entry)));
+      row.append($('<td>').append(formatLogLocation(entry)));
       row.append($('<td>').text(entry.game_name ? entry.game_name + (entry.console_title ? ' - ' + entry.console_title : '') : (entry.host || '-')));
       row.append($('<td>').append($('<button>').addClass('button hover').attr({id: 'log-details-button-' + entry.id, type: 'button', 'aria-expanded': 'false'}).on('click', function() { openLogDetails(entry.id); }).text('Details')));
       body.append(row);
@@ -954,7 +989,7 @@ function renderLogsPage(payload) {
           .data('eventId', entry.id)
           .append(
             $('<td>')
-              .attr('colspan', 7)
+              .attr('colspan', 8)
               .append(
                 $('<div>')
                   .addClass('logs-detail-box')

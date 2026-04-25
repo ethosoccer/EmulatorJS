@@ -41,8 +41,20 @@ def ensure_db(db_path: Path) -> sqlite3.Connection:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp DESC)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_events_username ON events(username)")
+    ensure_column(conn, "events", "geo_summary", "TEXT")
+    ensure_column(conn, "events", "geo_country", "TEXT")
+    ensure_column(conn, "events", "geo_region", "TEXT")
+    ensure_column(conn, "events", "geo_city", "TEXT")
+    ensure_column(conn, "events", "geo_postal_code", "TEXT")
+    ensure_column(conn, "events", "geo_timezone", "TEXT")
     conn.commit()
     return conn
+
+
+def ensure_column(conn: sqlite3.Connection, table: str, column: str, column_type: str) -> None:
+    existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    if column not in existing:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_type}")
 
 
 def utc_now_iso() -> str:
@@ -59,8 +71,9 @@ def write_event(conn: sqlite3.Connection, payload: dict) -> dict:
         INSERT INTO events (
           timestamp, event_type, action, status, title, username, role, source, ip,
           forwarded_for, user_agent, host, origin, referer, request_path,
-          game_name, game_file, console, console_title, emulator, details_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          game_name, game_file, console, console_title, emulator, details_json,
+          geo_summary, geo_country, geo_region, geo_city, geo_postal_code, geo_timezone
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             timestamp,
@@ -84,6 +97,12 @@ def write_event(conn: sqlite3.Connection, payload: dict) -> dict:
             game.get("consoleTitle", ""),
             game.get("emulator", ""),
             json.dumps(entry, ensure_ascii=True, sort_keys=True),
+            entry.get("geoSummary", ""),
+            entry.get("geoCountry", ""),
+            entry.get("geoRegion", ""),
+            entry.get("geoCity", ""),
+            entry.get("geoPostalCode", ""),
+            entry.get("geoTimezone", ""),
         ),
     )
     cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).replace(microsecond=0).isoformat()
@@ -115,9 +134,9 @@ def query_events(conn: sqlite3.Connection, payload: dict) -> dict:
 
     search = str(filters.get("search") or "").strip()
     if search:
-      where.append("(title LIKE ? OR username LIKE ? OR ip LIKE ? OR game_name LIKE ? OR console LIKE ? OR event_type LIKE ?)")
+      where.append("(title LIKE ? OR username LIKE ? OR ip LIKE ? OR game_name LIKE ? OR console LIKE ? OR event_type LIKE ? OR geo_summary LIKE ? OR geo_city LIKE ? OR geo_region LIKE ? OR geo_country LIKE ?)")
       needle = f"%{search}%"
-      params.extend([needle, needle, needle, needle, needle, needle])
+      params.extend([needle, needle, needle, needle, needle, needle, needle, needle, needle, needle])
 
     since_days = filters.get("sinceDays")
     if since_days not in (None, "", "all"):
@@ -133,7 +152,8 @@ def query_events(conn: sqlite3.Connection, payload: dict) -> dict:
     rows = conn.execute(
         """
         SELECT id, timestamp, event_type, action, status, title, username, role, source, ip,
-               host, game_name, game_file, console, console_title, emulator, details_json
+               host, game_name, game_file, console, console_title, emulator, details_json,
+               geo_summary, geo_country, geo_region, geo_city, geo_postal_code, geo_timezone
         FROM events
         """
         + where_sql

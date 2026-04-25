@@ -21,6 +21,8 @@ var RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
 var AUTH_ATTEMPT_LIMIT = 20;
 var FORGOT_PASSWORD_LIMIT = 5;
 var USERNAME_REGEX = /^[A-Za-z0-9._-]{3,32}$/;
+var geoLookupCache = new Map();
+var GEO_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 app.use(express.json({ limit: '150MB' }));
 
 function roleFor(profileRecord) {
@@ -172,6 +174,148 @@ function publicRequestIps(req) {
     seen.add(ip);
     return true;
   });
+}
+
+function cloudflareGeo(req) {
+  let geo = {
+    source: 'cloudflare',
+    country: String(req.headers['cf-ipcountry'] || '').trim(),
+    countryCode: String(req.headers['cf-ipcountry'] || '').trim(),
+    region: String(req.headers['cf-region'] || '').trim(),
+    regionCode: String(req.headers['cf-region-code'] || '').trim(),
+    city: String(req.headers['cf-ipcity'] || req.headers['cf-city'] || '').trim(),
+    postalCode: String(req.headers['cf-postal-code'] || '').trim(),
+    timezone: String(req.headers['cf-timezone'] || '').trim(),
+    latitude: String(req.headers['cf-iplatitude'] || '').trim(),
+    longitude: String(req.headers['cf-iplongitude'] || '').trim(),
+    metroCode: String(req.headers['cf-metro-code'] || '').trim(),
+    isp: '',
+    org: '',
+    asn: ''
+  };
+  let hasData = Object.keys(geo).some(function(key) {
+    return key !== 'source' && geo[key];
+  });
+  if (!hasData || geo.countryCode === 'XX') {
+    return null;
+  }
+  return geo;
+}
+
+function buildGeoSummary(geo) {
+  if (!geo) {
+    return '';
+  }
+  let parts = [];
+  if (geo.city) {
+    parts.push(geo.city);
+  }
+  if (geo.region) {
+    parts.push(geo.region);
+  } else if (geo.regionCode) {
+    parts.push(geo.regionCode);
+  }
+  if (geo.country) {
+    parts.push(geo.country);
+  } else if (geo.countryCode) {
+    parts.push(geo.countryCode);
+  }
+  let summary = parts.join(', ');
+  if (!summary && geo.timezone) {
+    summary = geo.timezone;
+  }
+  return summary;
+}
+
+function cacheGeoLookup(ip, geo) {
+  if (!ip || !geo) {
+    return geo;
+  }
+  geoLookupCache.set(ip, {
+    expires: Date.now() + GEO_CACHE_TTL_MS,
+    value: geo
+  });
+  return geo;
+}
+
+function cachedGeoLookup(ip) {
+  let cached = geoLookupCache.get(ip);
+  if (!cached) {
+    return null;
+  }
+  if (cached.expires < Date.now()) {
+    geoLookupCache.delete(ip);
+    return null;
+  }
+  return cached.value;
+}
+
+function fetchGeoLookup(ip) {
+  return new Promise(function(resolve) {
+    if (!ip || isPrivateIp(ip)) {
+      resolve(null);
+      return;
+    }
+    let request = https.get('https://ipwho.is/' + encodeURIComponent(ip), { timeout: 5000 }, function(response) {
+      let body = '';
+      response.on('data', function(chunk) {
+        body += chunk.toString();
+      });
+      response.on('end', function() {
+        try {
+          let json = JSON.parse(body || '{}');
+          if (json && json.success !== false) {
+            resolve({
+              source: 'ipwhois',
+              country: String(json.country || '').trim(),
+              countryCode: String(json.country_code || '').trim(),
+              region: String(json.region || '').trim(),
+              regionCode: String(json.region_code || '').trim(),
+              city: String(json.city || '').trim(),
+              postalCode: String(json.postal || '').trim(),
+              timezone: json.timezone && json.timezone.id ? String(json.timezone.id).trim() : '',
+              latitude: json.latitude || '',
+              longitude: json.longitude || '',
+              metroCode: '',
+              isp: String(json.connection && json.connection.isp || '').trim(),
+              org: String(json.connection && json.connection.org || '').trim(),
+              asn: String(json.connection && json.connection.asn || '').trim()
+            });
+            return;
+          }
+        } catch (e) {}
+        resolve(null);
+      });
+    });
+    request.on('timeout', function() {
+      request.destroy();
+      resolve(null);
+    });
+    request.on('error', function() {
+      resolve(null);
+    });
+  });
+}
+
+async function requestGeo(req) {
+  let publicIps = publicRequestIps(req);
+  let publicIp = publicIps[0] || '';
+  if (!publicIp) {
+    return null;
+  }
+  let cached = cachedGeoLookup(publicIp);
+  if (cached) {
+    return cached;
+  }
+  let fromHeaders = cloudflareGeo(req);
+  if (fromHeaders) {
+    return cacheGeoLookup(publicIp, fromHeaders);
+  }
+  let lookedUp = await fetchGeoLookup(publicIp);
+  if (lookedUp) {
+    return cacheGeoLookup(publicIp, lookedUp);
+  }
+  return null;
 }
 
 function requestIp(req) {
@@ -428,9 +572,23 @@ async function emitConfiguredWebhook(settings, payload) {
 }
 
 async function emitActivityWebhook(settings, req, payload) {
+  let geo = await requestGeo(req);
   let basePayload = Object.assign({
     app: 'EmulatorJS'
   }, requestMetadata(req), payload || {});
+  basePayload.geo = geo || null;
+  basePayload.geoSummary = geo ? buildGeoSummary(geo) : (isPrivateIp(basePayload.localIp || basePayload.ip) ? 'Local network' : '');
+  basePayload.geoCountry = geo && geo.country || '';
+  basePayload.geoCountryCode = geo && geo.countryCode || '';
+  basePayload.geoRegion = geo && (geo.region || geo.regionCode) || '';
+  basePayload.geoCity = geo && geo.city || '';
+  basePayload.geoPostalCode = geo && geo.postalCode || '';
+  basePayload.geoTimezone = geo && geo.timezone || '';
+  basePayload.geoLatitude = geo && geo.latitude || '';
+  basePayload.geoLongitude = geo && geo.longitude || '';
+  basePayload.geoIsp = geo && geo.isp || '';
+  basePayload.geoOrg = geo && geo.org || '';
+  basePayload.geoAsn = geo && geo.asn || '';
   if (settings.localLogsEnabled !== false) {
     runLogDb('write', {
       retentionDays: settings.localLogRetentionDays || 90,

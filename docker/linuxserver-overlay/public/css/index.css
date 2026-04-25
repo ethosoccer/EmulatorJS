@@ -564,6 +564,18 @@ button:focus-visible {
   color: var(--text);
 }
 
+.logs-ip-cell,
+.logs-location-cell {
+  display: grid;
+  gap: 4px;
+}
+
+.logs-cell-subtle {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.3;
+}
+
 .sideitem {
   width: 100%;
   min-height: 36px;

@@ -85,6 +85,8 @@ var RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
 var ADMIN_AUTH_LIMIT = 15;
 var USERNAME_REGEX = /^[A-Za-z0-9._-]{3,32}$/;
 var settingsFile = home + '/profile/settings.json';
+var geoLookupCache = new Map();
+var GEO_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 function rescanFlagPath(dir, file) {
   return hashPath + dir + '/rescan/' + encodeURIComponent(file) + '.rescan';
@@ -331,6 +333,148 @@ function publicRequestIps(req) {
   });
 }
 
+function cloudflareGeo(req) {
+  let geo = {
+    source: 'cloudflare',
+    country: String(req.headers['cf-ipcountry'] || '').trim(),
+    countryCode: String(req.headers['cf-ipcountry'] || '').trim(),
+    region: String(req.headers['cf-region'] || '').trim(),
+    regionCode: String(req.headers['cf-region-code'] || '').trim(),
+    city: String(req.headers['cf-ipcity'] || req.headers['cf-city'] || '').trim(),
+    postalCode: String(req.headers['cf-postal-code'] || '').trim(),
+    timezone: String(req.headers['cf-timezone'] || '').trim(),
+    latitude: String(req.headers['cf-iplatitude'] || '').trim(),
+    longitude: String(req.headers['cf-iplongitude'] || '').trim(),
+    metroCode: String(req.headers['cf-metro-code'] || '').trim(),
+    isp: '',
+    org: '',
+    asn: ''
+  };
+  let hasData = Object.keys(geo).some(function(key) {
+    return key !== 'source' && geo[key];
+  });
+  if (!hasData || geo.countryCode === 'XX') {
+    return null;
+  }
+  return geo;
+}
+
+function buildGeoSummary(geo) {
+  if (!geo) {
+    return '';
+  }
+  let parts = [];
+  if (geo.city) {
+    parts.push(geo.city);
+  }
+  if (geo.region) {
+    parts.push(geo.region);
+  } else if (geo.regionCode) {
+    parts.push(geo.regionCode);
+  }
+  if (geo.country) {
+    parts.push(geo.country);
+  } else if (geo.countryCode) {
+    parts.push(geo.countryCode);
+  }
+  let summary = parts.join(', ');
+  if (!summary && geo.timezone) {
+    summary = geo.timezone;
+  }
+  return summary;
+}
+
+function cacheGeoLookup(ip, geo) {
+  if (!ip || !geo) {
+    return geo;
+  }
+  geoLookupCache.set(ip, {
+    expires: Date.now() + GEO_CACHE_TTL_MS,
+    value: geo
+  });
+  return geo;
+}
+
+function cachedGeoLookup(ip) {
+  let cached = geoLookupCache.get(ip);
+  if (!cached) {
+    return null;
+  }
+  if (cached.expires < Date.now()) {
+    geoLookupCache.delete(ip);
+    return null;
+  }
+  return cached.value;
+}
+
+function fetchGeoLookup(ip) {
+  return new Promise(function(resolve) {
+    if (!ip || isPrivateIp(ip)) {
+      resolve(null);
+      return;
+    }
+    let request = https.get('https://ipwho.is/' + encodeURIComponent(ip), { timeout: 5000 }, function(response) {
+      let body = '';
+      response.on('data', function(chunk) {
+        body += chunk.toString();
+      });
+      response.on('end', function() {
+        try {
+          let json = JSON.parse(body || '{}');
+          if (json && json.success !== false) {
+            resolve({
+              source: 'ipwhois',
+              country: String(json.country || '').trim(),
+              countryCode: String(json.country_code || '').trim(),
+              region: String(json.region || '').trim(),
+              regionCode: String(json.region_code || '').trim(),
+              city: String(json.city || '').trim(),
+              postalCode: String(json.postal || '').trim(),
+              timezone: json.timezone && json.timezone.id ? String(json.timezone.id).trim() : '',
+              latitude: json.latitude || '',
+              longitude: json.longitude || '',
+              metroCode: '',
+              isp: String(json.connection && json.connection.isp || '').trim(),
+              org: String(json.connection && json.connection.org || '').trim(),
+              asn: String(json.connection && json.connection.asn || '').trim()
+            });
+            return;
+          }
+        } catch (e) {}
+        resolve(null);
+      });
+    });
+    request.on('timeout', function() {
+      request.destroy();
+      resolve(null);
+    });
+    request.on('error', function() {
+      resolve(null);
+    });
+  });
+}
+
+async function requestGeo(req) {
+  let publicIps = publicRequestIps(req);
+  let publicIp = publicIps[0] || '';
+  if (!publicIp) {
+    return null;
+  }
+  let cached = cachedGeoLookup(publicIp);
+  if (cached) {
+    return cached;
+  }
+  let fromHeaders = cloudflareGeo(req);
+  if (fromHeaders) {
+    return cacheGeoLookup(publicIp, fromHeaders);
+  }
+  let lookedUp = await fetchGeoLookup(publicIp);
+  if (lookedUp) {
+    return cacheGeoLookup(publicIp, lookedUp);
+  }
+  return null;
+}
+
 function requestIp(req) {
   let publicIps = publicRequestIps(req);
   if (publicIps.length) {
@@ -532,6 +676,7 @@ function sendInflux(settings, payload, detailed) {
 
 async function emitActivityWebhook(req, payload) {
   let settings = await readSettings();
+  let geo = await requestGeo(req);
   let publicIps = publicRequestIps(req);
   let localIp = forwardedIps(req)[0] || normalizeIp(req.headers['x-real-ip']) || normalizeIp(req.socket.remoteAddress) || '';
   let publicIpv4 = publicIps.find(function(ip) { return net.isIP(ip) === 4; }) || '';
@@ -556,6 +701,19 @@ async function emitActivityWebhook(req, payload) {
     requestPath: req.originalUrl || req.url || '',
     remoteAddress: normalizeIp(req.socket.remoteAddress)
   }, payload || {});
+  eventPayload.geo = geo || null;
+  eventPayload.geoSummary = geo ? buildGeoSummary(geo) : (isPrivateIp(eventPayload.localIp || eventPayload.ip) ? 'Local network' : '');
+  eventPayload.geoCountry = geo && geo.country || '';
+  eventPayload.geoCountryCode = geo && geo.countryCode || '';
+  eventPayload.geoRegion = geo && (geo.region || geo.regionCode) || '';
+  eventPayload.geoCity = geo && geo.city || '';
+  eventPayload.geoPostalCode = geo && geo.postalCode || '';
+  eventPayload.geoTimezone = geo && geo.timezone || '';
+  eventPayload.geoLatitude = geo && geo.latitude || '';
+  eventPayload.geoLongitude = geo && geo.longitude || '';
+  eventPayload.geoIsp = geo && geo.isp || '';
+  eventPayload.geoOrg = geo && geo.org || '';
+  eventPayload.geoAsn = geo && geo.asn || '';
   if (settings.localLogsEnabled !== false) {
     runLogDb('write', {
       retentionDays: settings.localLogRetentionDays || 90,

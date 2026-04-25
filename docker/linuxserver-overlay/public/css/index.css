@@ -543,6 +543,27 @@ button:focus-visible {
   overflow-wrap: anywhere;
 }
 
+.logs-detail-row {
+  display: none;
+}
+
+.logs-detail-row.is-open {
+  display: table-row;
+}
+
+.logs-detail-box {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border-top: 1px solid var(--line);
+  background: color-mix(in srgb, var(--panel-soft) 88%, transparent);
+}
+
+.logs-detail-title {
+  font-weight: 700;
+  color: var(--text);
+}
+
 .sideitem {
   width: 100%;
   min-height: 36px;

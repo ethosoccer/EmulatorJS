@@ -775,14 +775,33 @@ function renderLanding() {
   $('#main').append($('#landing').html());
 }
 
+function closeExpandedLogDetails(exceptEventId) {
+  $('.logs-detail-row.is-open').each(function() {
+    var detailRow = $(this);
+    var eventId = detailRow.data('eventId');
+    if (String(eventId) === String(exceptEventId)) {
+      return;
+    }
+    detailRow.removeClass('is-open');
+    $('#log-details-button-' + eventId).text('Details').attr('aria-expanded', 'false');
+  });
+}
+
 function openLogDetails(eventId) {
-  var row = $('#log-row-' + eventId);
-  if (!row.length) {
+  var detailRow = $('#log-detail-row-' + eventId);
+  var button = $('#log-details-button-' + eventId);
+  if (!detailRow.length || !button.length) {
     return;
   }
-  emptyModal();
-  $('#modal-content').append($('<pre>').addClass('log-details-json').text(JSON.stringify(row.data('details') || {}, null, 2)));
-  showModal();
+  var isOpen = detailRow.hasClass('is-open');
+  closeExpandedLogDetails(eventId);
+  if (isOpen) {
+    detailRow.removeClass('is-open');
+    button.text('Details').attr('aria-expanded', 'false');
+    return;
+  }
+  detailRow.addClass('is-open');
+  button.text('Hide Details').attr('aria-expanded', 'true');
 }
 
 function saveLogSettings() {
@@ -920,15 +939,30 @@ function renderLogsPage(payload) {
   } else {
     $.each(events, function(index, entry) {
       var row = $('<tr>').attr('id', 'log-row-' + entry.id);
-      row.data('details', entry.details || {});
       row.append($('<td>').text(formatLogTimestamp(entry.timestamp, logTimezone)));
       row.append($('<td>').text((entry.title || entry.event_type || 'Event') + (entry.status ? ' (' + entry.status + ')' : '')));
       row.append($('<td>').text(entry.username || '-'));
       row.append($('<td>').text(entry.source || '-'));
       row.append($('<td>').text(entry.ip || '-'));
       row.append($('<td>').text(entry.game_name ? entry.game_name + (entry.console_title ? ' - ' + entry.console_title : '') : (entry.host || '-')));
-      row.append($('<td>').append($('<button>').addClass('button hover').attr('type', 'button').on('click', function() { openLogDetails(entry.id); }).text('Details')));
+      row.append($('<td>').append($('<button>').addClass('button hover').attr({id: 'log-details-button-' + entry.id, type: 'button', 'aria-expanded': 'false'}).on('click', function() { openLogDetails(entry.id); }).text('Details')));
       body.append(row);
+      body.append(
+        $('<tr>')
+          .attr('id', 'log-detail-row-' + entry.id)
+          .addClass('logs-detail-row')
+          .data('eventId', entry.id)
+          .append(
+            $('<td>')
+              .attr('colspan', 7)
+              .append(
+                $('<div>')
+                  .addClass('logs-detail-box')
+                  .append($('<div>').addClass('logs-detail-title').text('Event Details'))
+                  .append($('<pre>').addClass('log-details-json').text(JSON.stringify(entry.details || {}, null, 2)))
+              )
+          )
+      );
     });
   }
   table.append(body);

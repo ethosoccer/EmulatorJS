@@ -817,6 +817,22 @@ function showProfileTab(tab) {
 function setProfileStatus(message) {
   $('#profile-status').text(message || '');
 }
+function isLoginGateActive() {
+  return requireMainLogin && (!localStorage.getItem('user') || !localStorage.getItem('pass'));
+}
+function silenceBackgroundMedia(clearSource) {
+  var video = $('#bgvid').get(0);
+  if (!video) {
+    return;
+  }
+  video.pause();
+  video.muted = true;
+  video.volume = 0;
+  if (clearSource) {
+    $('#vid').removeAttr('src');
+    video.load();
+  }
+}
 async function forgotProfilePassword() {
   var user = $('#profile-user').val() || localStorage.getItem('user') || '';
   if (!user) {
@@ -888,6 +904,10 @@ function updateLoginState() {
       $('body').addClass('profile-required');
       $('#login-panel').removeClass('hidden');
       setProfileStatus('Login required.');
+      silenceBackgroundMedia(true);
+      $('#background').attr('src', '');
+      $('#corner').attr('src', '');
+      $('#console-list-tools').addClass('hidden');
     }
   }
 }
@@ -1526,6 +1546,10 @@ function updateConsoleBackButton(root, data) {
 }
 // Load and play video
 var loadvideo = debounce(function(active_item) {
+  if (isLoginGateActive()) {
+    silenceBackgroundMedia(true);
+    return;
+  }
   var name = $('#i' + active_item.toString()).data('name');
   var has_video = $('#i' + active_item.toString()).data('has_video');
   var video_position = $('#i' + active_item.toString()).data('video_position');
@@ -2399,20 +2423,24 @@ async function loadjson(name, active_item) {
   rendermenu([data, active_item]);
 }
 
-window.onload = function() {
+window.onload = async function() {
   updateLoginState();
-  loadPublicSettings();
+  await loadPublicSettings();
   $('#game-search').on('input', debounce(runGameSearch, 150));
   $('#console-filter').on('change', runGameSearch);
   $('#art-filter').on('change', runGameSearch);
   $('#favorites-filter').on('change', runGameSearch);
-  if (! window.location.hash) {
-    loadjson('main');
+  if (!isLoginGateActive()) {
+    if (! window.location.hash) {
+      loadjson('main');
+    } else {
+      var hash = window.location.hash.replace('#','');
+      var name = hash.split('---')[0];
+      let active_item = hash.split('---')[1];
+      loadjson(name, active_item);
+    }
   } else {
-    var hash = window.location.hash.replace('#','');
-    var name = hash.split('---')[0];
-    let active_item = hash.split('---')[1];
-    loadjson(name, active_item);
+    silenceBackgroundMedia(true);
   }
   $(window).on('hashchange', function() {
     window.location.reload();

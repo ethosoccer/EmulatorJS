@@ -139,6 +139,7 @@ body.profile-required .login-panel {
 .search-panel.hidden,
 .favorites-panel.hidden,
 .save-panel.hidden,
+.variant-panel.hidden,
 .login-panel.hidden,
 .advanced-search.hidden {
   display: none;
@@ -256,6 +257,7 @@ body.profile-required .login-panel {
 .search-panel,
 .favorites-panel,
 .save-panel,
+.variant-panel,
 .login-panel {
   position: absolute;
   top: 6vh;
@@ -282,6 +284,47 @@ body.profile-required .login-panel {
 
 .save-panel {
   z-index: 1000001;
+}
+
+#variant-panel {
+  z-index: 1000002;
+}
+
+.variant-result-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: stretch;
+  margin-top: 10px;
+}
+
+.variant-launch {
+  border: 1px solid rgba(255, 255, 255, .28);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .06);
+  color: white;
+  text-align: left;
+  cursor: pointer;
+  padding: 12px 14px;
+  font: inherit;
+}
+
+.variant-launch:hover,
+.variant-launch:focus-visible {
+  background: rgba(255, 255, 255, .14);
+}
+
+.variant-launch-title {
+  display: block;
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.variant-launch-meta {
+  display: block;
+  margin-top: 4px;
+  color: rgba(255, 255, 255, .7);
+  font-size: 13px;
 }
 
 body.profile-required .login-panel {

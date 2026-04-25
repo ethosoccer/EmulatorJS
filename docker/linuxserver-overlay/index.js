@@ -125,6 +125,98 @@ function normalizeRomName(value) {
     .toLowerCase();
 }
 
+function canonicalVariantInfo(fileName) {
+  let fileExtension = path.extname(fileName || '');
+  let baseName = path.basename(fileName || '', fileExtension).trim();
+  let working = baseName;
+  let tokens = [];
+  function isRegionToken(content) {
+    let value = String(content || '').trim().toLowerCase();
+    return /^(u|usa|e|europe|j|japan|w|world|g|germany|f|france|s|spain|i|italy|australia|asia|unl|pd)$/i.test(value)
+      || /^(usa|europe|japan|world)(,\s*(usa|europe|japan|world))+$/i.test(value);
+  }
+  function isVersionToken(content) {
+    return /^v\d+(\.\d+)?$/i.test(String(content || '').trim()) || /^rev\s*\d+$/i.test(String(content || '').trim());
+  }
+  function shouldStripParen(content) {
+    let value = String(content || '').trim();
+    return isRegionToken(value)
+      || isVersionToken(value)
+      || /^(beta|proto|sample|demo|hack|unl|pd)$/i.test(value);
+  }
+  while (true) {
+    let match = working.match(/\s*(\[[^\]]+\]|\([^()]+\))\s*$/);
+    if (!match) {
+      break;
+    }
+    let token = match[1];
+    let content = token.slice(1, -1).trim();
+    if (token.startsWith('[') || shouldStripParen(content)) {
+      tokens.unshift({raw: token, content: content});
+      working = working.slice(0, match.index).trim();
+      continue;
+    }
+    break;
+  }
+  let region = '';
+  let version = '';
+  let flags = [];
+  let clean = false;
+  for (let token of tokens) {
+    if (!region && isRegionToken(token.content)) {
+      region = token.content;
+      continue;
+    }
+    if (!version && isVersionToken(token.content)) {
+      version = token.content.toUpperCase();
+      continue;
+    }
+    if (token.raw === '[!]') {
+      clean = true;
+      continue;
+    }
+    flags.push(token.raw);
+  }
+  let title = working || baseName;
+  let canonicalKey = normalizeRomName(title);
+  let regionKey = normalizeRomName(region || 'default');
+  let artGroupKey = canonicalKey + '|' + regionKey;
+  return {
+    fileName: fileName,
+    title: title,
+    canonicalKey: canonicalKey,
+    artGroupKey: artGroupKey,
+    region: region,
+    version: version,
+    flags: flags,
+    clean: clean
+  };
+}
+
+function artStateDir(dir) {
+  return hashPath + dir + '/art-state/';
+}
+
+function artFailPath(dir, fileName, assetType) {
+  return artStateDir(dir) + encodeURIComponent(fileName) + '--' + assetType + '.failed';
+}
+
+async function markArtFailed(dir, fileName, assetType) {
+  await fsw.mkdir(artStateDir(dir), {recursive: true});
+  await fsw.writeFile(artFailPath(dir, fileName, assetType), new Date().toISOString());
+}
+
+function artFailed(dir, fileName, assetType) {
+  return fs.existsSync(artFailPath(dir, fileName, assetType));
+}
+
+async function clearArtFailed(dir, fileName, assetType) {
+  let failPath = artFailPath(dir, fileName, assetType);
+  if (fs.existsSync(failPath)) {
+    await fsw.rm(failPath, {force: true});
+  }
+}
+
 async function autoIdentifyPreferredRegion(dir, preferredRegion) {
   if (!preferredRegion) {
     return 0;
@@ -1116,13 +1208,17 @@ io.on('connection', async function (socket) {
     socket.emit('renderrom', [identified, unidentified, metaData]);
   }
   // IPFS downloading
-  async function ipfsDownload(cid, file, count) {
+  async function ipfsDownload(cid, file, count, options) {
     count++
+    options = Object.assign({
+      timeout: ipfsDownloadTimeout,
+      attempts: ipfsDownloadAttempts
+    }, options || {});
     await fsw.mkdir(path.dirname(file), { recursive: true });
     let writeStream = fs.createWriteStream(file);
     socket.emit('modaldata', 'Downloading: ' + file);
     try {
-      for await (var fileStream of ipfs.cat(cid, {'timeout': ipfsDownloadTimeout})) {
+      for await (var fileStream of ipfs.cat(cid, {'timeout': options.timeout})) {
         writeStream.write(fileStream);
       };
       writeStream.end();
@@ -1134,7 +1230,7 @@ io.on('connection', async function (socket) {
       };
     } catch (e) {
       writeStream.end();
-      if (count < ipfsDownloadAttempts) {
+      if (count < options.attempts) {
         if (reconnectDefaultPeer) {
           try {
             await ipfsDefaultPeer();
@@ -1142,16 +1238,16 @@ io.on('connection', async function (socket) {
             console.log('Default IPFS peer unavailable; continuing retry:', peerError.message || peerError);
           };
         };
-        return await ipfsDownload(cid, file, count);
+        return await ipfsDownload(cid, file, count, options);
       } else {
         socket.emit('modaldata', 'ERROR Downloading: ' + file);
         if (fs.existsSync(file)) {
           fs.unlinkSync(file);
         }
-        return '';
+        return false;
       };
     };
-    return '';
+    return true;
   };
 
   // Set default ipfs peer if DL times out
@@ -1340,23 +1436,68 @@ io.on('connection', async function (socket) {
   }
 
   // Download art assets from IPFS
-  async function downloadArt(dir) {
+  async function downloadArt(data) {
+    let dir = Array.isArray(data) ? data[0] : data;
+    let fullScan = Array.isArray(data) ? !!data[1] : true;
     var metaData = await getMeta(dir);
     var shaPath = hashPath + dir + '/roms/';
     var files = await fsw.readdir(shaPath);
+    var artCache = {};
+    var mode = fullScan ? 'all items' : 'new items only';
+    var downloadedCount = 0;
+    var skippedCount = 0;
+    var failedCount = 0;
     socket.emit('emptymodal');
+    socket.emit('modaldata', 'Downloading art for ' + dir + ' (' + mode + ')');
     for await (var file of files) {
       var fileName = file.replace('.sha1','');
       var fileExtension = path.extname(fileName);
       var name = path.basename(fileName, fileExtension);
       var sha = await fsw.readFile(shaPath + file, 'utf8');
+      var variantInfo = canonicalVariantInfo(fileName);
       if (metaData.hasOwnProperty(sha)) {
         if (metaData[sha].hasOwnProperty('ref')) {
           var sha = metaData[sha].ref;
         };
         for await (var variable of metaVariables) {
           if (metaData[sha].hasOwnProperty(variable[0])) {
-            await ipfsDownload(metaData[sha][variable[0]], dataRoot + dir + '/' + variable[1] + '/' + name + variable[2], 0) 
+            let targetFile = dataRoot + dir + '/' + variable[1] + '/' + name + variable[2];
+            let cacheKey = variantInfo.artGroupKey + '|' + variable[0] + '|' + metaData[sha][variable[0]];
+            if (!fullScan && fs.existsSync(targetFile)) {
+              skippedCount++;
+              continue;
+            }
+            if (!fullScan && artFailed(dir, fileName, variable[0])) {
+              skippedCount++;
+              socket.emit('modaldata', 'Skipping failed ' + variable[0] + ': ' + fileName);
+              continue;
+            }
+            if (artCache[cacheKey] && artCache[cacheKey].status === 'success' && fs.existsSync(artCache[cacheKey].file)) {
+              await fsw.mkdir(path.dirname(targetFile), {recursive: true});
+              await fsw.copyFile(artCache[cacheKey].file, targetFile);
+              await clearArtFailed(dir, fileName, variable[0]);
+              downloadedCount++;
+              socket.emit('modaldata', 'Copied cached ' + variable[0] + ': ' + fileName);
+              continue;
+            }
+            if (!fullScan && artCache[cacheKey] && artCache[cacheKey].status === 'failed') {
+              skippedCount++;
+              await markArtFailed(dir, fileName, variable[0]);
+              continue;
+            }
+            let success = await ipfsDownload(metaData[sha][variable[0]], targetFile, 0, {
+              timeout: Math.min(ipfsDownloadTimeout, 2500),
+              attempts: 3
+            });
+            if (success) {
+              artCache[cacheKey] = {status: 'success', file: targetFile};
+              await clearArtFailed(dir, fileName, variable[0]);
+              downloadedCount++;
+            } else {
+              artCache[cacheKey] = {status: 'failed'};
+              await markArtFailed(dir, fileName, variable[0]);
+              failedCount++;
+            }
           };
         };
         if (metaData[sha].hasOwnProperty('video_position')) {
@@ -1364,7 +1505,7 @@ io.on('connection', async function (socket) {
         };
       };
     };
-    socket.emit('modaldata', 'Downloaded All Files');
+    socket.emit('modaldata', 'Art download complete. Downloaded/Copied: ' + downloadedCount + ', Skipped: ' + skippedCount + ', Failed: ' + failedCount);
     getRoms(dir);
   };
 

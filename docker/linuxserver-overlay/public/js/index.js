@@ -490,10 +490,14 @@ function purgeNoArt(name) {
 
 // Download art for all identified roms
 function downloadArt(name) {
+  var choice = prompt('Type "all" to download art for all identified items, or press OK/Enter to process only new items.', 'new');
+  if (choice === null) {
+    return;
+  }
   $('#main').empty();
   $('#main').append('<div class="loader"></div>');
-  $('#modal').toggle(100);
-  socket.emit('downloadart', name);
+  showModal();
+  socket.emit('downloadart', [name, choice.toLowerCase() === 'all']);
 }
 
 // Tell server to download the default file set

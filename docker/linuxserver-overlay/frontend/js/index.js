@@ -33,6 +33,7 @@ var lastSaveWatchSignature = null;
 var saveInventoryCache;
 var saveInventoryLoading;
 var savePanelBackHandler = null;
+var variantPanelState = null;
 var requireMainLogin = false;
 var isSafari = navigator.vendor && navigator.vendor.indexOf('Apple') > -1 &&
                navigator.userAgent &&
@@ -766,6 +767,73 @@ function closeSavePanel() {
   setSavePanelBack(null);
   $('#save-panel').addClass('hidden');
 }
+function closeVariantPanel() {
+  variantPanelState = null;
+  $('#variant-panel').addClass('hidden');
+}
+function variantSummary(variant) {
+  var bits = [];
+  if (variant.regionLabel) {
+    bits.push(variant.regionLabel);
+  }
+  if (variant.versionLabel) {
+    bits.push(variant.versionLabel);
+  }
+  if (variant.extraLabel) {
+    bits.push(variant.extraLabel);
+  }
+  return bits.join(' · ') || 'Default release';
+}
+function renderVariantPanel() {
+  if (!variantPanelState || !variantPanelState.variants || variantPanelState.variants.length <= 1) {
+    closeVariantPanel();
+    return;
+  }
+  $('#variant-panel-title').text(safeDecodeDisplayName(variantPanelState.title || 'Choose a Version'));
+  $('#variant-panel-status').text(variantPanelState.variants.length + ' version' + (variantPanelState.variants.length === 1 ? '' : 's') + ' available');
+  $('#variant-panel-results').empty();
+  for (var variant of variantPanelState.variants) {
+    var row = $('<div>').addClass('variant-result-row');
+    var button = $('<button>').addClass('variant-launch').attr('type', 'button');
+    button.attr('onclick', 'launch(this)');
+    button.attr('data-variant-choice', 'true');
+    button.attr('data-group-display-name', variantPanelState.title || variant.displayName || variant.name);
+    button.attr('data-close-variant-panel', 'true');
+    button.attr('data-parent-root', variantPanelState.root || '');
+    button.attr('data-parent-title', variantPanelState.consoleTitle || '');
+    button.attr('data-group-key', variantPanelState.groupKey || '');
+    button.attr('data-variant-label', variantSummary(variant));
+    button.attr('data-variant-count', '1');
+    button.attr('data-display-name', variant.displayName || variant.name);
+    button.attr('data-name', variant.name);
+    button.attr('data-original-index', Number(variant.index || 0));
+    for (var key of defaultKeys) {
+      button.attr('data-' + key, String(variant.resolved[key] || ''));
+    }
+    button.append($('<span>').addClass('variant-launch-title').text(safeDecodeDisplayName(variant.name)));
+    button.append($('<span>').addClass('variant-launch-meta').text(variantSummary(variant)));
+    row.append(button);
+    $('#variant-panel-results').append(row);
+  }
+  $('#variant-panel').removeClass('hidden');
+}
+function openVariantPanel(entry) {
+  if (!entry || !entry.variants || entry.variants.length <= 1) {
+    return;
+  }
+  closeSearchPanel();
+  closeFavoritesPanel();
+  closeLoginPanel();
+  closeSavePanel();
+  variantPanelState = {
+    title: entry.displayName || entry.name,
+    groupKey: entry.groupKey || '',
+    root: entry.root || '',
+    consoleTitle: entry.title || '',
+    variants: entry.variants.slice()
+  };
+  renderVariantPanel();
+}
 async function openGameSaves(event, gameName, gameBase) {
   if (event) {
     event.preventDefault();
@@ -774,6 +842,7 @@ async function openGameSaves(event, gameName, gameBase) {
   closeSearchPanel();
   closeFavoritesPanel();
   closeLoginPanel();
+  closeVariantPanel();
   $('#save-panel-title').text('Saves for ' + safeDecodeDisplayName(gameName));
   $('#save-panel-status').text('Loading saves...');
   $('#save-panel-results').empty();
@@ -915,6 +984,7 @@ function openLoginPanel() {
   closeSearchPanel();
   closeFavoritesPanel();
   closeSavePanel();
+  closeVariantPanel();
   $('#login-panel').removeClass('hidden');
   updateLoginState();
 }
@@ -1293,6 +1363,7 @@ function downloadRom(event, button) {
 function openSearchPanel() {
   closeFavoritesPanel();
   closeSavePanel();
+  closeVariantPanel();
   $('#search-panel').removeClass('hidden');
   ensureSearchCatalog().then(function() {
     runGameSearch();
@@ -1320,6 +1391,7 @@ function clearGameSearch() {
 function showFavorites() {
   closeSearchPanel();
   closeSavePanel();
+  closeVariantPanel();
   $('#favorites-panel').removeClass('hidden');
   $('#favorites-status').text('Loading favorites...');
   $('#favorites-results').empty();
@@ -1375,6 +1447,204 @@ function resolveItem(item, defaults) {
   }
   return resolved;
 }
+function normalizeVariantKey(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[_\-]+/g, ' ')
+    .replace(/[^\w\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+function terminalVariantToken(name) {
+  return name.match(/(\[[^\]]+\]|\([^()]+\))\s*$/);
+}
+function isRegionLabel(value) {
+  return /^(u|usa|e|europe|j|japan|g|germany|f|france|s|spain|it|italy|australia|world|ue|usa,\s*europe|europe,\s*usa)$/i.test(String(value || '').trim());
+}
+function isVersionLabel(value) {
+  return /^(v\d+(\.\d+)?|rev(ision)?\s*\d+)$/i.test(String(value || '').trim());
+}
+function parseVariantInfo(name) {
+  var working = String(name || '').trim();
+  var tokens = [];
+  while (true) {
+    var match = terminalVariantToken(working);
+    if (!match) {
+      break;
+    }
+    var token = match[1];
+    tokens.unshift(token);
+    working = working.slice(0, match.index).trim();
+  }
+  var region = '';
+  var version = '';
+  var flags = [];
+  var clean = false;
+  tokens.forEach(function(raw) {
+    var content = raw.slice(1, -1).trim();
+    if (!region && isRegionLabel(content)) {
+      region = content;
+      return;
+    }
+    if (!version && isVersionLabel(content)) {
+      version = content.toUpperCase();
+      return;
+    }
+    if (raw === '[!]') {
+      clean = true;
+      return;
+    }
+    flags.push(raw);
+  });
+  var title = working || String(name || '').trim();
+  var extraLabel = flags.map(function(flag) {
+    return flag.slice(1, -1);
+  }).join(', ');
+  return {
+    name: name,
+    title: title,
+    groupKey: normalizeVariantKey(title),
+    regionLabel: region,
+    versionLabel: version,
+    extraLabel: extraLabel,
+    flags: flags,
+    clean: clean,
+    searchText: [name, title, region, version, extraLabel].join(' ').toLowerCase()
+  };
+}
+function regionPriority(label) {
+  var value = String(label || '').toUpperCase();
+  if (value === 'U' || value === 'USA') {
+    return 120;
+  }
+  if (value === 'USA, EUROPE' || value === 'EUROPE, USA' || value === 'UE') {
+    return 110;
+  }
+  if (value === 'E' || value === 'EUROPE') {
+    return 100;
+  }
+  if (value === 'WORLD') {
+    return 95;
+  }
+  if (value === 'J' || value === 'JAPAN') {
+    return 90;
+  }
+  if (value === 'G' || value === 'GERMANY' || value === 'F' || value === 'FRANCE' || value === 'S' || value === 'SPAIN' || value === 'IT' || value === 'ITALY') {
+    return 85;
+  }
+  return value ? 70 : 60;
+}
+function versionPriority(label) {
+  var match = String(label || '').toUpperCase().match(/(\d+)(?:\.(\d+))?/);
+  if (!match) {
+    return 0;
+  }
+  return (Number(match[1] || 0) * 100) + Number(match[2] || 0);
+}
+function variantPreferenceScore(variant) {
+  var score = 0;
+  if (variant.resolved.has_logo === true || variant.resolved.has_logo === 'true') {
+    score += 30;
+  }
+  if (variant.resolved.has_video === true || variant.resolved.has_video === 'true') {
+    score += 20;
+  }
+  if (variant.clean) {
+    score += 10;
+  }
+  score += regionPriority(variant.regionLabel);
+  score += versionPriority(variant.versionLabel);
+  if (variant.extraLabel) {
+    score -= 5;
+  }
+  return score;
+}
+function groupConsoleItems(consoleConfig, consoleRoot) {
+  var defaults = consoleConfig.defaults || {};
+  var groups = {};
+  var entries = [];
+  var index = 0;
+  var allowGrouping = consoleRoot !== 'main' && !(consoleConfig.hasOwnProperty('multi_name') && hasUsableValue(consoleConfig.multi_name));
+  Object.keys(consoleConfig.items).forEach(function(name) {
+    var item = consoleConfig.items[name];
+    if ((item.hasOwnProperty('cloneof')) && (consoleConfig.items.hasOwnProperty(item.cloneof))) {
+      return;
+    }
+    var resolved = resolveItem(item, defaults);
+    var itemType = resolved.type;
+    var parsed = parseVariantInfo(name);
+    var variant = {
+      id: resolved.path + '::' + name,
+      name: name,
+      displayName: parsed.title,
+      title: consoleConfig.title || consoleRoot,
+      root: consoleRoot,
+      path: resolved.path,
+      index: index,
+      resolved: resolved,
+      multiDisc: Number(resolved.multi_disc || 0),
+      extension: resolved.rom_extension || '',
+      hasLogo: resolved.has_logo === true || resolved.has_logo === 'true',
+      hasVideo: resolved.has_video === true || resolved.has_video === 'true',
+      groupKey: parsed.groupKey,
+      regionLabel: parsed.regionLabel,
+      versionLabel: parsed.versionLabel,
+      extraLabel: parsed.extraLabel,
+      flags: parsed.flags,
+      clean: parsed.clean,
+      searchText: parsed.searchText
+    };
+    if (!allowGrouping || itemType !== 'game') {
+      entries.push({
+        id: variant.id,
+        key: 'single:' + name,
+        name: name,
+        displayName: name,
+        root: consoleRoot,
+        title: consoleConfig.title || consoleRoot,
+        originalIndex: index,
+        representative: variant,
+        variants: [variant],
+        variantCount: 1,
+        searchText: variant.searchText,
+        itemType: itemType
+      });
+      index++;
+      return;
+    }
+    if (!groups[variant.groupKey]) {
+      groups[variant.groupKey] = {
+        id: variant.id,
+        key: variant.groupKey,
+        name: parsed.title,
+        displayName: parsed.title,
+        root: consoleRoot,
+        title: consoleConfig.title || consoleRoot,
+        variants: [],
+        searchTextParts: []
+      };
+      entries.push(groups[variant.groupKey]);
+    }
+    groups[variant.groupKey].variants.push(variant);
+    groups[variant.groupKey].searchTextParts.push(variant.searchText);
+    index++;
+  });
+  entries.forEach(function(entry) {
+    if (!entry.variants || entry.variants.length === 0) {
+      return;
+    }
+    entry.variants.sort(function(a, b) {
+      return variantPreferenceScore(b) - variantPreferenceScore(a) || a.name.localeCompare(b.name);
+    });
+    entry.representative = entry.variants[0];
+    entry.originalIndex = entry.representative.index;
+    entry.variantCount = entry.variants.length;
+    entry.id = entry.representative.id;
+    entry.itemType = entry.representative.resolved.type;
+    entry.searchText = entry.searchTextParts ? entry.searchTextParts.join(' ') : entry.representative.searchText;
+  });
+  return entries;
+}
 async function fetchConfig(name) {
   if (searchSourceConfigs[name]) {
     return searchSourceConfigs[name];
@@ -1404,33 +1674,27 @@ async function buildSearchCatalog() {
   for await (var consoleRoot of Object.keys(mainConfig.items)) {
     try {
       var consoleConfig = await fetchConfig(consoleRoot);
-      var defaults = consoleConfig.defaults || {};
       var consoleTitle = consoleConfig.title || consoleRoot;
       consoles.push({root: consoleRoot, title: consoleTitle});
-      var index = 0;
-      for await (var name of Object.keys(consoleConfig.items)) {
-        var item = consoleConfig.items[name];
-        if ((item.hasOwnProperty('cloneof')) && (consoleConfig.items.hasOwnProperty(item.cloneof))) {
+      for await (var entry of groupConsoleItems(consoleConfig, consoleRoot)) {
+        if (entry.itemType !== 'game') {
           continue;
         }
-        var resolved = resolveItem(item, defaults);
-        if (resolved.type !== 'game') {
-          index++;
-          continue;
-        }
+        var resolved = entry.representative.resolved;
         catalog.push({
-          id: resolved.path + '::' + name,
-          name: name,
+          id: entry.id,
+          name: entry.displayName,
           root: consoleRoot,
           title: consoleTitle,
-          index: index,
+          index: entry.originalIndex,
           path: resolved.path,
           hasLogo: resolved.has_logo === true || resolved.has_logo === 'true',
           hasVideo: resolved.has_video === true || resolved.has_video === 'true',
           multiDisc: Number(resolved.multi_disc || 0),
-          extension: resolved.rom_extension || ''
+          extension: resolved.rom_extension || '',
+          variantCount: entry.variantCount || 1,
+          searchText: entry.searchText || entry.displayName.toLowerCase()
         });
-        index++;
       }
     } catch(e) {
       console.log('Unable to index config', consoleRoot, e);
@@ -1458,7 +1722,7 @@ function runGameSearch() {
   var favoritesOnly = $('#favorites-filter').prop('checked');
   var favorites = getFavoriteIds();
   var results = searchCatalog.items.filter(function(item) {
-    if (query && item.name.toLowerCase().indexOf(query) === -1) {
+    if (query && (item.searchText || item.name.toLowerCase()).indexOf(query) === -1) {
       return false;
     }
     if (consoleFilter !== 'all' && item.root !== consoleFilter) {
@@ -1505,6 +1769,9 @@ function renderSearchResults(results, query, favoritesOnly) {
     if (!item.hasVideo) {
       meta += ' - missing video';
     }
+    if (item.variantCount > 1) {
+      meta += ' - ' + item.variantCount + ' versions';
+    }
     if (item.multiDisc > 1) {
       meta += ' - ' + item.multiDisc + ' discs';
     }
@@ -1533,6 +1800,7 @@ function goBackToMain() {
   closeFavoritesPanel();
   closeLoginPanel();
   closeSavePanel();
+  closeVariantPanel();
   $('#console-list-search').val('');
   if (window.location.hash === '#main') {
     loadjson('main');
@@ -1614,14 +1882,25 @@ function loadlogos(logo_load_start, display_items, items_length, active_item) {
 }
 // Launcher
 function launch(active_item) {
-  var selected = active_item && active_item.nodeType ? $(active_item) : $('#i' + active_item.toString()).first();
+  var selected = active_item && active_item.jquery ? active_item : (active_item && active_item.nodeType ? $(active_item) : $('#i' + active_item.toString()).first());
   var selectedIndex = selected.attr('id') ? Number(selected.attr('id').replace('i', '')) : Number(active_item);
   var name = selected.data('name');
+  var displayName = selected.data('group-display-name') || selected.data('display-name') || name;
   var type = selected.data('type');
   var multi = selected.data('multi_disc');
   var root = $('#menu').data('root');
   var originalActiveItem = Number(selected.attr('data-original-index') || selectedIndex);
-  $(document).attr('title', name);
+  var menuEntries = $('#menu').data('menuEntries') || [];
+  var menuIndex = Number(selected.attr('data-menu-index'));
+  var groupedEntry = !isNaN(menuIndex) ? menuEntries[menuIndex] : null;
+  if (selected.data('variant-choice') !== true && groupedEntry && groupedEntry.variantCount > 1 && type == 'game') {
+    openVariantPanel(groupedEntry);
+    return;
+  }
+  if (selected.data('close-variant-panel') === true) {
+    closeVariantPanel();
+  }
+  $(document).attr('title', displayName);
   if (type == 'menu') {
     window.location.href = '#' + name
   } else if (multi > 1) {
@@ -1866,6 +2145,7 @@ function launch(active_item) {
 async function rendermenu(datas) {
   var data = datas[0];
   var active_item = datas[1];
+  closeVariantPanel();
   // Set default variables
   var portrait = window.orientation;
   $('#menu').data('config', data);
@@ -1873,30 +2153,25 @@ async function rendermenu(datas) {
   $('#menu').data('root', root);
   updateConsoleBackButton(root, data);
   var parent = data.parent;
-  var allItems = {};
-  var originalIndexByName = {};
-  var originalCount = 0;
-  for await (var originalName of Object.keys(data.items)) {
-    var originalItem = data.items[originalName];
-    if ((originalItem.hasOwnProperty('cloneof')) && (data.items.hasOwnProperty(originalItem.cloneof))) {
-      continue;
-    }
-    allItems[originalName] = originalItem;
-    originalIndexByName[originalName] = originalCount;
-    originalCount++;
-  };
-  data.items = allItems;
-  var items = allItems;
-  if (Object.keys(allItems).length == 0) {
+  var allEntries = groupConsoleItems(data, root);
+  $('#menu').data('menuEntries', allEntries);
+  if (allEntries.length == 0) {
     alert('No items to load, please add some games');
     return '';
   };
-  var items_length = Object.keys(allItems).length - 1;
+  var filteredEntries = allEntries.slice();
+  var items_length = filteredEntries.length - 1;
   // Determine counts and style based on menu items
   var display_items = data.display_items;
   if (typeof active_item == 'undefined'){
     var active_item = Math.floor(display_items/2);
   };
+  var mappedActive = filteredEntries.findIndex(function(entry) {
+    return Number(entry.originalIndex) === Number(active_item);
+  });
+  if (mappedActive >= 0) {
+    active_item = mappedActive;
+  }
   var image_height = Math.floor(100/display_items).toString() + 'vh';
   var visible_items = display_items;
   // Render zoom effect on active item
@@ -1920,7 +2195,7 @@ async function rendermenu(datas) {
   };
   var jumpIndex = {};
   var letters = "abcdefghijklmnopqrstuvwxyz".split("");
-  var filteredNames = Object.keys(allItems);
+  var filteredNames = filteredEntries.map(function(entry) { return entry.displayName; });
   function renderConsoleFilterState(totalCount, filteredCount, query) {
     var showFilter = root !== 'main' && !(data.hasOwnProperty('multi_name') && hasUsableValue(data.multi_name));
     $('#console-list-tools').toggleClass('hidden', !showFilter);
@@ -1936,8 +2211,10 @@ async function rendermenu(datas) {
       $('#console-list-status').text(totalCount + ' games');
     }
   }
-  function buildMenuEntry(name, count) {
-    var item = data.items[name];
+  function buildMenuEntry(entry, count) {
+    var item = entry.representative.resolved;
+    var name = entry.representative.name;
+    var displayName = entry.displayName || name;
     // Use text or image tag based on logo
     if (item.hasOwnProperty('has_logo')) {
       var has_logo = item.has_logo;
@@ -1951,14 +2228,18 @@ async function rendermenu(datas) {
       var romName = name;
     };
     if (has_logo == true) {
-      var logo_html = '<img class="menu-img" alt="'+ romName +'" title="'+ romName +'">';
+      var logo_html = '<img class="menu-img" alt="'+ displayName +'" title="'+ displayName +'">';
     } else {
-      var logo_html = '<p class="menu-img">' + name + '</p>';
+      var logo_html = '<p class="menu-img">' + escapeHtml(displayName) + '</p>';
     };
     // Set varibles to default if not set in item
     var jsdata = '';
-    jsdata += 'data-name="' + romName + '" ';
-    jsdata += 'data-original-index="' + originalIndexByName[name] + '" ';
+    jsdata += 'data-name="' + escapeHtml(romName) + '" ';
+    jsdata += 'data-display-name="' + escapeHtml(displayName) + '" ';
+    jsdata += 'data-group-display-name="' + escapeHtml(displayName) + '" ';
+    jsdata += 'data-menu-index="' + count + '" ';
+    jsdata += 'data-original-index="' + entry.originalIndex + '" ';
+    jsdata += 'data-variant-count="' + (entry.variantCount || 1) + '" ';
     for (var key of defaultKeys) {
       if (item.hasOwnProperty(key)) {
         jsdata += 'data-' + key + '="' + item[key] + '" ';
@@ -1969,8 +2250,8 @@ async function rendermenu(datas) {
     var itemType = item.hasOwnProperty('type') ? item.type : data.defaults.type;
     var itemPath = item.hasOwnProperty('path') ? item.path : data.defaults.path;
     var itemTitle = data.title || itemPath || 'Games';
-    var favoriteName = cleanGameName(romName, itemPath + '::' + name);
-    var favoriteId = itemPath + '::' + favoriteName;
+    var favoriteName = cleanGameName(displayName, itemPath + '::' + displayName);
+    var favoriteId = entry.id || (itemPath + '::' + romName);
     var saveBase = saveBasename(romName + (item.hasOwnProperty('rom_extension') ? item.rom_extension : data.defaults.rom_extension || ''));
     var favoriteButton = '';
     var saveButton = '';
@@ -1978,7 +2259,7 @@ async function rendermenu(datas) {
     if (itemType == 'game') {
       saveButton = '<button class="save-toggle hidden" type="button" data-save-base="' + escapeHtml(saveBase) + '" data-save-name="' + escapeHtml(favoriteName) + '" onclick="openGameSaves(event, this.getAttribute(\'data-save-name\'), this.getAttribute(\'data-save-base\'))" aria-label="Download saves" title="No local saves found">&#128190;</button>';
       romDownloadButton = '<button class="rom-download-toggle" type="button" data-rom-path="' + escapeHtml(itemPath) + '" data-rom-name="' + escapeHtml(romName) + '" data-rom-extension="' + escapeHtml(item.hasOwnProperty('rom_extension') ? item.rom_extension : data.defaults.rom_extension || '') + '" onclick="downloadRom(event, this)" aria-label="Download ROM" title="Download ROM">&#10515;</button>';
-      favoriteButton = '<button class="favorite-toggle" type="button" data-favorite-id="' + escapeHtml(favoriteId) + '" data-favorite-name="' + escapeHtml(favoriteName) + '" data-favorite-root="' + escapeHtml(root) + '" data-favorite-title="' + escapeHtml(itemTitle) + '" data-favorite-index="' + originalIndexByName[name] + '" onclick="toggleFavorite(event, this.getAttribute(\'data-favorite-id\'), this)" aria-label="Toggle favorite" title="Add to favorites">&hearts;</button>';
+      favoriteButton = '<button class="favorite-toggle" type="button" data-favorite-id="' + escapeHtml(favoriteId) + '" data-favorite-name="' + escapeHtml(favoriteName) + '" data-favorite-root="' + escapeHtml(root) + '" data-favorite-title="' + escapeHtml(itemTitle) + '" data-favorite-index="' + entry.originalIndex + '" onclick="toggleFavorite(event, this.getAttribute(\'data-favorite-id\'), this)" aria-label="Toggle favorite" title="Add to favorites">&hearts;</button>';
     }
     return '\
       <div id="m' + count + '">\
@@ -2000,7 +2281,7 @@ async function rendermenu(datas) {
       }
       if (itemIndex >= 0 && itemIndex <= items_length && filteredNames[itemIndex] && !rendered[itemIndex]) {
         rendered[itemIndex] = true;
-        $('#games-list').append(buildMenuEntry(filteredNames[itemIndex], itemIndex));
+        $('#games-list').append(buildMenuEntry(filteredEntries[itemIndex], itemIndex));
       }
     }
     for (var favoriteId of getFavoriteIds()) {
@@ -2017,21 +2298,18 @@ async function rendermenu(datas) {
   function renderMenuItems(nextActiveItem) {
     var showFilter = root !== 'main' && !(data.hasOwnProperty('multi_name') && hasUsableValue(data.multi_name));
     var query = showFilter ? ($('#console-list-search').val() || '').toLowerCase().trim() : '';
-    filteredNames = Object.keys(allItems).filter(function(name) {
-      return !query || name.toLowerCase().indexOf(query) !== -1;
+    filteredEntries = allEntries.filter(function(entry) {
+      return !query || (entry.searchText || entry.displayName.toLowerCase()).indexOf(query) !== -1;
     });
-    items = {};
-    for (var filteredName of filteredNames) {
-      items[filteredName] = allItems[filteredName];
-    }
-    data.items = items;
-    items_length = filteredNames.length - 1;
-    visible_items = Math.min(display_items, filteredNames.length);
+    $('#menu').data('menuEntries', filteredEntries);
+    filteredNames = filteredEntries.map(function(entry) { return entry.displayName; });
+    items_length = filteredEntries.length - 1;
+    visible_items = Math.min(display_items, filteredEntries.length);
     jumpIndex = {};
     $('#games-list').empty();
     $('#active-list').empty();
-    renderConsoleFilterState(Object.keys(allItems).length, filteredNames.length, query);
-    if (filteredNames.length === 0) {
+    renderConsoleFilterState(allEntries.length, filteredEntries.length, query);
+    if (filteredEntries.length === 0) {
       active_item = 0;
       $('#active-list').append('<div class="console-empty">No games match "' + escapeHtml($('#console-list-search').val() || '') + '".</div>');
       $('#vid').attr('src', '');
@@ -2044,8 +2322,9 @@ async function rendermenu(datas) {
       active_item = 0;
     }
     var count = 0;
-    for (var name of filteredNames) {
+    for (var entry of filteredEntries) {
       // Generate an index table based on alphabetical order ignoring numbers
+      var name = entry.displayName || entry.name;
       if (count == 0) {
         jumpIndex['0'] = count;
       } else {

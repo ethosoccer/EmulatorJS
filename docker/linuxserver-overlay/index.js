@@ -15,6 +15,7 @@ var { spawn, spawnSync } = require('child_process');
 var { create } = require('ipfs-http-client');
 var crypto = require('crypto');
 var https = require('https');
+var net = require('net');
 var ipfs = create();
 var merge = require('deepmerge');
 
@@ -273,9 +274,70 @@ function consumeRateLimit(map, key, limit, windowMs) {
   return true;
 }
 
+function normalizeIp(value) {
+  let ip = String(value || '').trim();
+  if (!ip) {
+    return '';
+  }
+  if (ip.startsWith('::ffff:')) {
+    return ip.slice(7);
+  }
+  return ip;
+}
+
+function forwardedIps(req) {
+  return String(req.headers['x-forwarded-for'] || '')
+    .split(',')
+    .map(normalizeIp)
+    .filter(Boolean);
+}
+
+function isPrivateIp(value) {
+  let ip = normalizeIp(value);
+  let version = net.isIP(ip);
+  if (!version) {
+    return false;
+  }
+  if (version === 4) {
+    return /^10\./.test(ip) ||
+      /^127\./.test(ip) ||
+      /^192\.168\./.test(ip) ||
+      /^169\.254\./.test(ip) ||
+      /^172\.(1[6-9]|2\d|3[0-1])\./.test(ip);
+  }
+  let lower = ip.toLowerCase();
+  return lower === '::1' ||
+    lower.startsWith('fc') ||
+    lower.startsWith('fd') ||
+    lower.startsWith('fe80:');
+}
+
+function publicRequestIps(req) {
+  let candidates = [
+    req.headers['cf-connecting-ip'],
+    req.headers['cf-connecting-ipv6'],
+    req.headers['true-client-ip']
+  ]
+    .concat(forwardedIps(req))
+    .map(normalizeIp)
+    .filter(Boolean);
+  let seen = new Set();
+  return candidates.filter(function(ip) {
+    if (seen.has(ip) || isPrivateIp(ip)) {
+      return false;
+    }
+    seen.add(ip);
+    return true;
+  });
+}
+
 function requestIp(req) {
-  let forwardedFor = String(req.headers['cf-connecting-ip'] || req.headers['x-real-ip'] || req.headers['x-forwarded-for'] || '').split(',')[0].trim();
-  return forwardedFor || req.socket.remoteAddress || '';
+  let publicIps = publicRequestIps(req);
+  if (publicIps.length) {
+    return publicIps[0];
+  }
+  let forwardedFor = forwardedIps(req)[0];
+  return forwardedFor || normalizeIp(req.headers['x-real-ip']) || normalizeIp(req.socket.remoteAddress) || '';
 }
 
 function originFromValue(value) {
@@ -470,16 +532,29 @@ function sendInflux(settings, payload, detailed) {
 
 async function emitActivityWebhook(req, payload) {
   let settings = await readSettings();
+  let publicIps = publicRequestIps(req);
+  let localIp = forwardedIps(req)[0] || normalizeIp(req.headers['x-real-ip']) || normalizeIp(req.socket.remoteAddress) || '';
+  let publicIpv4 = publicIps.find(function(ip) { return net.isIP(ip) === 4; }) || '';
+  let publicIpv6 = publicIps.find(function(ip) { return net.isIP(ip) === 6; }) || '';
   let eventPayload = Object.assign({
     app: 'EmulatorJS',
     time: new Date().toISOString(),
     ip: requestIp(req),
+    localIp: localIp,
+    publicIp: publicIps[0] || '',
+    publicIpv4: publicIpv4,
+    publicIpv6: publicIpv6,
+    publicIps: publicIps,
+    cfConnectingIp: normalizeIp(req.headers['cf-connecting-ip']),
+    cfConnectingIpv6: normalizeIp(req.headers['cf-connecting-ipv6']),
+    trueClientIp: normalizeIp(req.headers['true-client-ip']),
     forwardedFor: req.headers['x-forwarded-for'] || '',
     userAgent: req.headers['user-agent'] || '',
     host: req.headers.host || '',
     origin: req.headers.origin || '',
     referer: req.headers.referer || '',
-    requestPath: req.originalUrl || req.url || ''
+    requestPath: req.originalUrl || req.url || '',
+    remoteAddress: normalizeIp(req.socket.remoteAddress)
   }, payload || {});
   if (settings.localLogsEnabled !== false) {
     runLogDb('write', {

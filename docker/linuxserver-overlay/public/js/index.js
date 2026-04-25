@@ -796,8 +796,6 @@ function renderLogsPage(payload) {
       logFilters = {sinceDays: '7', eventType: 'all', status: 'all', username: '', search: '', limit: 200};
       socket.emit('renderlogs', logFilters);
     }).text('Reset')));
-  wrapper.append(filterCard);
-
   var settingsCard = $('<div>').addClass('card logs-card');
   settingsCard.append($('<h3>').text('Storage & Forwarding'));
   var settingsGrid = $('<div>').addClass('logs-filter-grid logs-settings-grid');
@@ -815,6 +813,7 @@ function renderLogsPage(payload) {
     .append($('<button>').addClass('button hover').attr('type', 'button').on('click', saveLogSettings).text('Save Log Settings'))
     .append($('<button>').addClass('button hover').attr('type', 'button').on('click', testInfluxSettings).text('Test Influx')));
   wrapper.append(settingsCard);
+  wrapper.append(filterCard);
 
   var tableCard = $('<div>').addClass('card logs-card');
   tableCard.append($('<h3>').text('Recent Events'));

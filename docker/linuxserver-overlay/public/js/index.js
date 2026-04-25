@@ -5,6 +5,71 @@ var path = window.location.pathname;
 var socket = io(protocol + '//' + host + ':' + port, { path: path + 'socket.io'});
 var adminReady = false;
 var logFilters = {sinceDays: '7', eventType: 'all', status: 'all', username: '', search: '', limit: 200};
+var logTimezoneStorageKey = 'ejs-admin-log-timezone';
+var browserTimezone = (Intl && Intl.DateTimeFormat().resolvedOptions().timeZone) || 'UTC';
+var logTimezone = localStorage.getItem(logTimezoneStorageKey) || browserTimezone;
+
+function getLogTimezoneOptions() {
+  var options = ['UTC'];
+  if (browserTimezone && options.indexOf(browserTimezone) === -1) {
+    options.unshift(browserTimezone);
+  }
+  var commonZones = [
+    'America/Denver',
+    'America/Los_Angeles',
+    'America/Chicago',
+    'America/New_York',
+    'Europe/London',
+    'Europe/Berlin',
+    'Asia/Tokyo',
+    'Australia/Sydney'
+  ];
+  commonZones.forEach(function(zone) {
+    if (options.indexOf(zone) === -1) {
+      options.push(zone);
+    }
+  });
+  if (Intl && typeof Intl.supportedValuesOf === 'function') {
+    Intl.supportedValuesOf('timeZone').forEach(function(zone) {
+      if (options.indexOf(zone) === -1) {
+        options.push(zone);
+      }
+    });
+  }
+  return options;
+}
+
+function formatLogTimestamp(value, timezone) {
+  if (!value) {
+    return '-';
+  }
+  var date = new Date(value);
+  if (isNaN(date.getTime())) {
+    return value;
+  }
+  var zone = timezone || browserTimezone || 'UTC';
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      year: 'numeric',
+      month: 'short',
+      day: '2-digit',
+      hour: 'numeric',
+      minute: '2-digit',
+      second: '2-digit',
+      timeZone: zone,
+      timeZoneName: 'short'
+    }).format(date);
+  } catch (e) {
+    return date.toLocaleString();
+  }
+}
+
+function changeLogTimezone() {
+  var selected = $('#logTimezone').val() || browserTimezone || 'UTC';
+  logTimezone = selected;
+  localStorage.setItem(logTimezoneStorageKey, selected);
+  socket.emit('renderlogs', logFilters);
+}
 
 function adminEndpoint(name) {
   var basePath = path.endsWith('/') ? path : path + '/';
@@ -827,7 +892,18 @@ function renderLogsPage(payload) {
   wrapper.append(filterCard);
 
   var tableCard = $('<div>').addClass('card logs-card');
-  tableCard.append($('<h3>').text('Recent Events'));
+  var tableHeader = $('<div>').addClass('logs-table-header');
+  tableHeader.append($('<h3>').text('Recent Events'));
+  var timezoneLabel = $('<label>').addClass('logs-timezone-picker').text('Timezone');
+  var timezoneSelect = $('<select>').attr('id', 'logTimezone');
+  getLogTimezoneOptions().forEach(function(zone) {
+    timezoneSelect.append($('<option>').attr('value', zone).text(zone));
+  });
+  timezoneSelect.val(logTimezone);
+  timezoneSelect.on('change', changeLogTimezone);
+  timezoneLabel.append(timezoneSelect);
+  tableHeader.append(timezoneLabel);
+  tableCard.append(tableHeader);
   var tableWrap = $('<div>').addClass('logs-table-wrap');
   var table = $('<table>').addClass('logs-table');
   table.append($('<thead>').append($('<tr>')
@@ -845,7 +921,7 @@ function renderLogsPage(payload) {
     $.each(events, function(index, entry) {
       var row = $('<tr>').attr('id', 'log-row-' + entry.id);
       row.data('details', entry.details || {});
-      row.append($('<td>').text(entry.timestamp || ''));
+      row.append($('<td>').text(formatLogTimestamp(entry.timestamp, logTimezone)));
       row.append($('<td>').text((entry.title || entry.event_type || 'Event') + (entry.status ? ' (' + entry.status + ')' : '')));
       row.append($('<td>').text(entry.username || '-'));
       row.append($('<td>').text(entry.source || '-'));

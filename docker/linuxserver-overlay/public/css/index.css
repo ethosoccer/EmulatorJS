@@ -432,6 +432,22 @@ button:focus-visible {
   margin: 0 0 8px;
 }
 
+.logs-table-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.logs-timezone-picker {
+  display: grid;
+  gap: 6px;
+  font-weight: 700;
+  color: var(--text);
+  min-width: min(280px, 100%);
+}
+
 .logs-subtitle,
 .logs-inline-note,
 .logs-status,

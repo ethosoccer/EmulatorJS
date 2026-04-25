@@ -153,7 +153,31 @@ socket.on('renderfiledirs', renderFileDirs);
 socket.on('renderprofiles', renderProfiles);
 socket.on('renderlogs', renderLogsPage);
 socket.on('influxtest', function(result) {
-  $('#logs-status').text(result.status === 'success' ? 'Influx test event sent.' : 'Influx test failed.');
+  var ok = result && result.status === 'success';
+  $('#logs-status').text(ok ? 'Influx test event sent.' : 'Influx test failed.');
+  emptyModal();
+  $('#modal-content').append($('<h3>').text(ok ? 'Influx Test Succeeded' : 'Influx Test Failed'));
+  $('#modal-content').append($('<p>').text(result && result.message ? result.message : (ok ? 'Influx accepted the test event.' : 'Influx did not accept the test event.')));
+  if (result && result.statusCode) {
+    $('#modal-content').append($('<p>').text('HTTP Status: ' + result.statusCode));
+  }
+  if (result && result.influxUrl) {
+    $('#modal-content').append($('<p>').text('Influx URL: ' + result.influxUrl));
+  }
+  if (result && result.influxOrg) {
+    $('#modal-content').append($('<p>').text('Org: ' + result.influxOrg));
+  }
+  if (result && result.influxBucket) {
+    $('#modal-content').append($('<p>').text('Bucket: ' + result.influxBucket));
+  }
+  if (result && result.requestPath) {
+    $('#modal-content').append($('<p>').text('Write Path: ' + result.requestPath));
+  }
+  if (result && result.responseBody) {
+    $('#modal-content').append($('<h3>').text('Influx Response'));
+    $('#modal-content').append($('<pre>').addClass('log-details-json').text(result.responseBody));
+  }
+  $('#modal').stop(true, true).show(100);
 });
 // Render in rom data
 socket.on('romdata', renderRomData);

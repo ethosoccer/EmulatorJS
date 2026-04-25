@@ -405,11 +405,16 @@ function buildInfluxLine(payload) {
   return 'emulatorjs_events,' + tags + ' ' + fields;
 }
 
-function sendInflux(settings, payload) {
+function sendInflux(settings, payload, detailed) {
   return new Promise(function(resolve, reject) {
     try {
       if (!settings.influxEnabled || !settings.influxUrl || !settings.influxOrg || !settings.influxBucket || !settings.influxToken) {
-        resolve(false);
+        resolve(detailed ? {
+          ok: false,
+          message: 'Missing one or more required Influx settings.',
+          statusCode: 0,
+          responseBody: ''
+        } : false);
         return;
       }
       let parsed = new URL(settings.influxUrl);
@@ -427,9 +432,19 @@ function sendInflux(settings, payload) {
         },
         timeout: 10000
       }, function(response) {
-        response.resume();
+        let responseBody = '';
+        response.on('data', function(chunk) {
+          responseBody += chunk.toString();
+        });
         response.on('end', function() {
-          resolve(response.statusCode >= 200 && response.statusCode < 300);
+          let ok = response.statusCode >= 200 && response.statusCode < 300;
+          resolve(detailed ? {
+            ok: ok,
+            message: ok ? 'Influx accepted the test event.' : 'Influx rejected the test event.',
+            statusCode: response.statusCode || 0,
+            responseBody: responseBody.trim(),
+            requestPath: (parsed.pathname.replace(/\/$/, '') || '') + '/api/v2/write?org=' + encodeURIComponent(settings.influxOrg) + '&bucket=' + encodeURIComponent(settings.influxBucket) + '&precision=ns'
+          } : ok);
         });
       });
       request.on('timeout', function() {
@@ -439,6 +454,15 @@ function sendInflux(settings, payload) {
       request.write(body);
       request.end();
     } catch (e) {
+      if (detailed) {
+        resolve({
+          ok: false,
+          message: e.message || 'Unable to build Influx request.',
+          statusCode: 0,
+          responseBody: ''
+        });
+        return;
+      }
       reject(e);
     }
   });
@@ -757,9 +781,14 @@ io.on('connection', async function (socket) {
     if (typeof data.influxToken === 'string' && data.influxToken.trim() !== '') {
       testSettings.influxToken = data.influxToken.trim();
     }
-    let ok = false;
+    let result = {
+      ok: false,
+      message: 'Influx test failed.',
+      statusCode: 0,
+      responseBody: ''
+    };
     try {
-      ok = await sendInflux(testSettings, {
+      result = await sendInflux(testSettings, {
         app: 'EmulatorJS',
         title: 'EmulatorJS Influx test event',
         event: 'influx_test',
@@ -774,11 +803,26 @@ io.on('connection', async function (socket) {
         origin: socket.handshake.headers.origin || '',
         referer: socket.handshake.headers.referer || '',
         requestPath: baseUrl
-      });
+      }, true);
     } catch (e) {
       console.log('Influx test failed', e);
+      result = {
+        ok: false,
+        message: e.message || 'Influx test failed.',
+        statusCode: 0,
+        responseBody: ''
+      };
     }
-    socket.emit('influxtest', {status: ok ? 'success' : 'error'});
+    socket.emit('influxtest', {
+      status: result.ok ? 'success' : 'error',
+      message: result.message || (result.ok ? 'Influx accepted the test event.' : 'Influx test failed.'),
+      statusCode: result.statusCode || 0,
+      responseBody: result.responseBody || '',
+      influxUrl: testSettings.influxUrl || '',
+      influxOrg: testSettings.influxOrg || '',
+      influxBucket: testSettings.influxBucket || '',
+      requestPath: result.requestPath || ''
+    });
   }
 
   // Send file contents to client

@@ -2,6 +2,7 @@
 !Dockerfile
 !index.js
 !profile.js
+!logdb.py
 !public/
 !public/**
 !frontend/

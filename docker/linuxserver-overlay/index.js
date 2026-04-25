@@ -11,7 +11,7 @@ var app = require('express')();
 var httpModule = require('http');
 var http = require('http').Server(app);
 var baserouter = express.Router();
-var { spawn } = require('child_process');
+var { spawn, spawnSync } = require('child_process');
 var { create } = require('ipfs-http-client');
 var crypto = require('crypto');
 var https = require('https');
@@ -225,7 +225,17 @@ async function authenticateProfile(user, pass) {
 }
 
 function defaultSettings() {
-  return {requireLogin: false, passwordResetWebhook: ''};
+  return {
+    requireLogin: false,
+    passwordResetWebhook: '',
+    localLogsEnabled: true,
+    localLogRetentionDays: 90,
+    influxEnabled: false,
+    influxUrl: '',
+    influxOrg: '',
+    influxBucket: '',
+    influxToken: ''
+  };
 }
 
 async function readSettings() {
@@ -234,6 +244,10 @@ async function readSettings() {
   } catch(e) {
     return defaultSettings();
   }
+}
+
+async function writeSettings(settings) {
+  await fsw.writeFile(settingsFile, JSON.stringify(Object.assign(defaultSettings(), settings), null, 2));
 }
 
 function adminTokenFromRequest(req) {
@@ -337,23 +351,126 @@ function sendWebhook(url, payload) {
   });
 }
 
+function runLogDb(command, payload) {
+  try {
+    let result = spawnSync('python3', [path.join(__dirname, 'logdb.py'), command, path.join(home, 'profile', 'activity.db')], {
+      input: JSON.stringify(payload || {}),
+      encoding: 'utf8'
+    });
+    if (result.status !== 0) {
+      console.log('logdb error', result.stderr || result.stdout);
+      return {status: 'error'};
+    }
+    return JSON.parse(result.stdout || '{}');
+  } catch (e) {
+    console.log('logdb invoke failed', e);
+    return {status: 'error'};
+  }
+}
+
+function escapeInfluxTag(value) {
+  return String(value || '').replace(/([ ,=])/g, '\\$1');
+}
+
+function escapeInfluxField(value) {
+  return '"' + String(value || '').replace(/(["\\])/g, '\\$1') + '"';
+}
+
+function buildInfluxLine(payload) {
+  let tags = [
+    'event=' + escapeInfluxTag(payload.event || ''),
+    'action=' + escapeInfluxTag(payload.action || ''),
+    'status=' + escapeInfluxTag(payload.status || ''),
+    'source=' + escapeInfluxTag(payload.source || 'unknown')
+  ].join(',');
+  let game = payload.game || {};
+  let fields = [
+    'count=1i',
+    'title=' + escapeInfluxField(payload.title || ''),
+    'username=' + escapeInfluxField(payload.username || ''),
+    'role=' + escapeInfluxField(payload.role || ''),
+    'ip=' + escapeInfluxField(payload.ip || ''),
+    'host=' + escapeInfluxField(payload.host || ''),
+    'user_agent=' + escapeInfluxField(payload.userAgent || ''),
+    'origin=' + escapeInfluxField(payload.origin || ''),
+    'referer=' + escapeInfluxField(payload.referer || ''),
+    'request_path=' + escapeInfluxField(payload.requestPath || ''),
+    'game_name=' + escapeInfluxField(game.name || ''),
+    'game_file=' + escapeInfluxField(game.file || ''),
+    'console=' + escapeInfluxField(game.console || ''),
+    'console_title=' + escapeInfluxField(game.consoleTitle || ''),
+    'emulator=' + escapeInfluxField(game.emulator || ''),
+    'details_json=' + escapeInfluxField(JSON.stringify(payload))
+  ].join(',');
+  return 'emulatorjs_events,' + tags + ' ' + fields;
+}
+
+function sendInflux(settings, payload) {
+  return new Promise(function(resolve, reject) {
+    try {
+      if (!settings.influxEnabled || !settings.influxUrl || !settings.influxOrg || !settings.influxBucket || !settings.influxToken) {
+        resolve(false);
+        return;
+      }
+      let parsed = new URL(settings.influxUrl);
+      let client = parsed.protocol === 'https:' ? https : httpModule;
+      let body = buildInfluxLine(payload);
+      let request = client.request({
+        method: 'POST',
+        hostname: parsed.hostname,
+        port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
+        path: (parsed.pathname.replace(/\/$/, '') || '') + '/api/v2/write?org=' + encodeURIComponent(settings.influxOrg) + '&bucket=' + encodeURIComponent(settings.influxBucket) + '&precision=ns',
+        headers: {
+          'Authorization': 'Token ' + settings.influxToken,
+          'Content-Type': 'text/plain; charset=utf-8',
+          'Content-Length': Buffer.byteLength(body)
+        },
+        timeout: 10000
+      }, function(response) {
+        response.resume();
+        response.on('end', function() {
+          resolve(response.statusCode >= 200 && response.statusCode < 300);
+        });
+      });
+      request.on('timeout', function() {
+        request.destroy(new Error('Influx request timed out'));
+      });
+      request.on('error', reject);
+      request.write(body);
+      request.end();
+    } catch (e) {
+      reject(e);
+    }
+  });
+}
+
 async function emitActivityWebhook(req, payload) {
   let settings = await readSettings();
-  if (!settings.passwordResetWebhook) {
-    return false;
+  let eventPayload = Object.assign({
+    app: 'EmulatorJS',
+    time: new Date().toISOString(),
+    ip: requestIp(req),
+    forwardedFor: req.headers['x-forwarded-for'] || '',
+    userAgent: req.headers['user-agent'] || '',
+    host: req.headers.host || '',
+    origin: req.headers.origin || '',
+    referer: req.headers.referer || '',
+    requestPath: req.originalUrl || req.url || ''
+  }, payload || {});
+  if (settings.localLogsEnabled !== false) {
+    runLogDb('write', {
+      retentionDays: settings.localLogRetentionDays || 90,
+      entry: eventPayload
+    });
   }
   try {
-    return await sendWebhook(settings.passwordResetWebhook, Object.assign({
-      app: 'EmulatorJS',
-      time: new Date().toISOString(),
-      ip: requestIp(req),
-      forwardedFor: req.headers['x-forwarded-for'] || '',
-      userAgent: req.headers['user-agent'] || '',
-      host: req.headers.host || '',
-      origin: req.headers.origin || '',
-      referer: req.headers.referer || '',
-      requestPath: req.originalUrl || req.url || ''
-    }, payload || {}));
+    if (settings.passwordResetWebhook) {
+      await sendWebhook(settings.passwordResetWebhook, eventPayload);
+    }
+    if (settings.influxEnabled) {
+      await sendInflux(settings, eventPayload);
+    }
+    return true;
   } catch (e) {
     console.log('Webhook send failed', e);
     return false;
@@ -590,6 +707,79 @@ io.on('connection', async function (socket) {
   function renderLanding() {
     socket.emit('renderlanding');
   };
+
+  async function renderLogs(filters) {
+    let settings = await readSettings();
+    let logs = runLogDb('query', {filters: filters || {}});
+    socket.emit('renderlogs', {
+      events: logs.events || [],
+      total: logs.total || 0,
+      filters: filters || {},
+      settings: {
+        localLogsEnabled: settings.localLogsEnabled !== false,
+        localLogRetentionDays: settings.localLogRetentionDays || 90,
+        influxEnabled: settings.influxEnabled === true,
+        influxUrl: settings.influxUrl || '',
+        influxOrg: settings.influxOrg || '',
+        influxBucket: settings.influxBucket || '',
+        influxTokenConfigured: !!settings.influxToken,
+        webhookConfigured: !!settings.passwordResetWebhook
+      }
+    });
+  }
+
+  async function saveLogSettings(data) {
+    let settings = await readSettings();
+    settings.localLogsEnabled = data.localLogsEnabled !== false;
+    settings.localLogRetentionDays = Math.max(1, Math.min(parseInt(data.localLogRetentionDays || 90, 10) || 90, 3650));
+    settings.influxEnabled = data.influxEnabled === true;
+    settings.influxUrl = String(data.influxUrl || '').trim();
+    settings.influxOrg = String(data.influxOrg || '').trim();
+    settings.influxBucket = String(data.influxBucket || '').trim();
+    if (typeof data.influxToken === 'string' && data.influxToken.trim() !== '') {
+      settings.influxToken = data.influxToken.trim();
+    } else if (data.clearInfluxToken === true) {
+      settings.influxToken = '';
+    }
+    await writeSettings(settings);
+    await renderLogs(data.filters || {});
+    socket.emit('modaldata', 'Saved log settings.');
+  }
+
+  async function testLogInflux(data) {
+    let settings = await readSettings();
+    let testSettings = Object.assign({}, settings, {
+      influxEnabled: data.influxEnabled === true,
+      influxUrl: String(data.influxUrl || '').trim(),
+      influxOrg: String(data.influxOrg || '').trim(),
+      influxBucket: String(data.influxBucket || '').trim()
+    });
+    if (typeof data.influxToken === 'string' && data.influxToken.trim() !== '') {
+      testSettings.influxToken = data.influxToken.trim();
+    }
+    let ok = false;
+    try {
+      ok = await sendInflux(testSettings, {
+        app: 'EmulatorJS',
+        title: 'EmulatorJS Influx test event',
+        event: 'influx_test',
+        action: 'settings_test',
+        status: 'success',
+        source: 'admin-logs',
+        username: existingSession ? existingSession.user : '',
+        role: existingSession ? existingSession.role : '',
+        time: new Date().toISOString(),
+        ip: socket.handshake.address || '',
+        host: socket.handshake.headers.host || '',
+        origin: socket.handshake.headers.origin || '',
+        referer: socket.handshake.headers.referer || '',
+        requestPath: baseUrl
+      });
+    } catch (e) {
+      console.log('Influx test failed', e);
+    }
+    socket.emit('influxtest', {status: ok ? 'success' : 'error'});
+  }
 
   // Send file contents to client
   async function getConfig(file) {
@@ -1262,6 +1452,9 @@ io.on('connection', async function (socket) {
   socket.on('usermeta', requireAdmin(userMeta));
   socket.on('renderfiles', requireAdmin(renderFiles));
   socket.on('renderprofiles', requireAdmin(renderProfiles));
+  socket.on('renderlogs', requireAdmin(renderLogs));
+  socket.on('savelogsettings', requireAdmin(saveLogSettings));
+  socket.on('testlogsinflux', requireAdmin(testLogInflux));
   socket.on('createprofile', requireAdmin(createProfile));
   socket.on('deleteprofile', requireAdmin(deleteProfile));
   socket.on('getromdata', requireAdmin(getRomData));

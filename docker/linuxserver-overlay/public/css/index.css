@@ -414,6 +414,81 @@ button:focus-visible {
   white-space: nowrap;
 }
 
+.logs-page {
+  display: grid;
+  gap: 16px;
+  padding-bottom: 40px;
+}
+
+.logs-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.logs-header h1,
+.logs-card h3 {
+  margin: 0 0 8px;
+}
+
+.logs-subtitle,
+.logs-inline-note,
+.logs-status,
+.logs-empty {
+  color: var(--muted);
+}
+
+.logs-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.logs-filter-grid label {
+  display: grid;
+  gap: 6px;
+  font-weight: 700;
+}
+
+.logs-button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.logs-table-wrap {
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.logs-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.logs-table th,
+.logs-table td {
+  padding: 10px 12px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--line);
+}
+
+.logs-table th {
+  background: var(--panel-soft);
+}
+
+.log-details-json {
+  margin: 0;
+  max-height: calc(100vh - 160px);
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .sideitem {
   width: 100%;
   min-height: 36px;

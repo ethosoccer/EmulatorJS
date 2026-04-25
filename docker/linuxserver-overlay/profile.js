@@ -9,6 +9,7 @@ var path = require('path');
 var JSZip = require('jszip');
 var http = require('http');
 var https = require('https');
+var { spawnSync } = require('child_process');
 
 // Default vars
 var error = {status: 'error'};
@@ -26,7 +27,17 @@ function roleFor(profileRecord) {
 }
 
 function defaultSettings() {
-  return {requireLogin: false, passwordResetWebhook: ''};
+  return {
+    requireLogin: false,
+    passwordResetWebhook: '',
+    localLogsEnabled: true,
+    localLogRetentionDays: 90,
+    influxEnabled: false,
+    influxUrl: '',
+    influxOrg: '',
+    influxBucket: '',
+    influxToken: ''
+  };
 }
 
 async function readProfiles() {
@@ -199,6 +210,99 @@ function sendWebhook(url, payload) {
   });
 }
 
+function runLogDb(command, payload) {
+  try {
+    let result = spawnSync('python3', [path.join(__dirname, 'logdb.py'), command, path.join(home, 'profile', 'activity.db')], {
+      input: JSON.stringify(payload || {}),
+      encoding: 'utf8'
+    });
+    if (result.status !== 0) {
+      console.log('logdb error', result.stderr || result.stdout);
+      return {status: 'error'};
+    }
+    return JSON.parse(result.stdout || '{}');
+  } catch (e) {
+    console.log('logdb invoke failed', e);
+    return {status: 'error'};
+  }
+}
+
+function escapeInfluxTag(value) {
+  return String(value || '').replace(/([ ,=])/g, '\\$1');
+}
+
+function escapeInfluxField(value) {
+  return '"' + String(value || '').replace(/(["\\])/g, '\\$1') + '"';
+}
+
+function buildInfluxLine(payload) {
+  let tags = [
+    'event=' + escapeInfluxTag(payload.event || ''),
+    'action=' + escapeInfluxTag(payload.action || ''),
+    'status=' + escapeInfluxTag(payload.status || ''),
+    'source=' + escapeInfluxTag(payload.source || 'unknown')
+  ].join(',');
+  let game = payload.game || {};
+  let fields = [
+    'count=1i',
+    'title=' + escapeInfluxField(payload.title || ''),
+    'username=' + escapeInfluxField(payload.username || ''),
+    'role=' + escapeInfluxField(payload.role || ''),
+    'ip=' + escapeInfluxField(payload.ip || ''),
+    'host=' + escapeInfluxField(payload.host || ''),
+    'user_agent=' + escapeInfluxField(payload.userAgent || ''),
+    'origin=' + escapeInfluxField(payload.origin || ''),
+    'referer=' + escapeInfluxField(payload.referer || ''),
+    'request_path=' + escapeInfluxField(payload.requestPath || ''),
+    'game_name=' + escapeInfluxField(game.name || ''),
+    'game_file=' + escapeInfluxField(game.file || ''),
+    'console=' + escapeInfluxField(game.console || ''),
+    'console_title=' + escapeInfluxField(game.consoleTitle || ''),
+    'emulator=' + escapeInfluxField(game.emulator || ''),
+    'details_json=' + escapeInfluxField(JSON.stringify(payload))
+  ].join(',');
+  return 'emulatorjs_events,' + tags + ' ' + fields;
+}
+
+function sendInflux(settings, payload) {
+  return new Promise(function(resolve, reject) {
+    try {
+      if (!settings.influxEnabled || !settings.influxUrl || !settings.influxOrg || !settings.influxBucket || !settings.influxToken) {
+        resolve(false);
+        return;
+      }
+      let parsed = new URL(settings.influxUrl);
+      let client = parsed.protocol === 'https:' ? https : http;
+      let body = buildInfluxLine(payload);
+      let request = client.request({
+        method: 'POST',
+        hostname: parsed.hostname,
+        port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
+        path: (parsed.pathname.replace(/\/$/, '') || '') + '/api/v2/write?org=' + encodeURIComponent(settings.influxOrg) + '&bucket=' + encodeURIComponent(settings.influxBucket) + '&precision=ns',
+        headers: {
+          'Authorization': 'Token ' + settings.influxToken,
+          'Content-Type': 'text/plain; charset=utf-8',
+          'Content-Length': Buffer.byteLength(body)
+        },
+        timeout: 10000
+      }, function(response) {
+        response.resume();
+        response.on('end', function() {
+          resolve(response.statusCode >= 200 && response.statusCode < 300);
+        });
+      });
+      request.on('timeout', function() {
+        request.destroy(new Error('Influx request timed out'));
+      });
+      request.on('error', reject);
+      request.write(body);
+      request.end();
+    } catch (e) {
+      reject(e);
+    }
+  });
+}
+
 function requestMetadata(req) {
   return {
     time: new Date().toISOString(),
@@ -228,7 +332,21 @@ async function emitActivityWebhook(settings, req, payload) {
   let basePayload = Object.assign({
     app: 'EmulatorJS'
   }, requestMetadata(req), payload || {});
-  return await emitConfiguredWebhook(settings, basePayload);
+  if (settings.localLogsEnabled !== false) {
+    runLogDb('write', {
+      retentionDays: settings.localLogRetentionDays || 90,
+      entry: basePayload
+    });
+  }
+  await emitConfiguredWebhook(settings, basePayload);
+  if (settings.influxEnabled) {
+    try {
+      await sendInflux(settings, basePayload);
+    } catch (e) {
+      console.log('Influx send failed', e);
+    }
+  }
+  return true;
 }
 
 function profilePathForUser(username) {

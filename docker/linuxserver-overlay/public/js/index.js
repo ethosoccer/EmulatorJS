@@ -4,6 +4,7 @@ var protocol = window.location.protocol;
 var path = window.location.pathname;
 var socket = io(protocol + '//' + host + ':' + port, { path: path + 'socket.io'});
 var adminReady = false;
+var logFilters = {sinceDays: '7', eventType: 'all', status: 'all', username: '', search: '', limit: 200};
 
 function adminEndpoint(name) {
   var basePath = path.endsWith('/') ? path : path + '/';
@@ -150,6 +151,10 @@ socket.on('emptymodal', emptyModal);
 socket.on('renderfiledirs', renderFileDirs);
 // Render file directories
 socket.on('renderprofiles', renderProfiles);
+socket.on('renderlogs', renderLogsPage);
+socket.on('influxtest', function(result) {
+  $('#logs-status').text(result.status === 'success' ? 'Influx test event sent.' : 'Influx test failed.');
+});
 // Render in rom data
 socket.on('romdata', renderRomData);
 // Render in custom metadata page
@@ -198,6 +203,10 @@ function renderMeta() {
 // Render profiles page
 function renderProfile() {
   socket.emit('renderprofiles');
+}
+
+function renderLogsView() {
+  socket.emit('renderlogs', logFilters);
 }
 
 // Render roms landing page
@@ -665,6 +674,158 @@ function renderLanding() {
   $('#main').empty();
   $('#side').empty();
   $('#main').append($('#landing').html());
+}
+
+function openLogDetails(eventId) {
+  var row = $('#log-row-' + eventId);
+  if (!row.length) {
+    return;
+  }
+  emptyModal();
+  $('#modal-content').append($('<pre>').addClass('log-details-json').text(JSON.stringify(row.data('details') || {}, null, 2)));
+  $('#modal').toggle(100);
+}
+
+function saveLogSettings() {
+  socket.emit('savelogsettings', {
+    localLogsEnabled: $('#localLogsEnabled').is(':checked'),
+    localLogRetentionDays: $('#localLogRetentionDays').val(),
+    influxEnabled: $('#influxEnabled').is(':checked'),
+    influxUrl: $('#influxUrl').val(),
+    influxOrg: $('#influxOrg').val(),
+    influxBucket: $('#influxBucket').val(),
+    influxToken: $('#influxToken').val(),
+    clearInfluxToken: $('#clearInfluxToken').is(':checked'),
+    filters: logFilters
+  });
+}
+
+function testInfluxSettings() {
+  $('#logs-status').text('Testing Influx...');
+  socket.emit('testlogsinflux', {
+    influxEnabled: $('#influxEnabled').is(':checked'),
+    influxUrl: $('#influxUrl').val(),
+    influxOrg: $('#influxOrg').val(),
+    influxBucket: $('#influxBucket').val(),
+    influxToken: $('#influxToken').val()
+  });
+}
+
+function applyLogFilters() {
+  logFilters = {
+    sinceDays: $('#logSinceDays').val(),
+    eventType: $('#logEventType').val(),
+    status: $('#logStatus').val(),
+    username: $('#logUsername').val(),
+    search: $('#logSearch').val(),
+    limit: 200
+  };
+  socket.emit('renderlogs', logFilters);
+}
+
+function renderLogsPage(payload) {
+  payload = payload || {};
+  logFilters = Object.assign({}, logFilters, payload.filters || {});
+  var settings = payload.settings || {};
+  var events = payload.events || [];
+  $('#main').empty();
+  $('#side').empty();
+  $('#nav-buttons').empty();
+
+  var wrapper = $('<div>').addClass('logs-page');
+  var heading = $('<div>').addClass('logs-header');
+  heading.append($('<div>').append($('<h1>').text('Activity Logs')).append($('<p>').addClass('logs-subtitle').text('Readable local logs with optional Influx forwarding.')));
+  heading.append($('<div>').attr('id', 'logs-status').addClass('logs-status').text('Showing ' + events.length + ' of ' + (payload.total || 0) + ' events.'));
+  wrapper.append(heading);
+
+  var filterCard = $('<div>').addClass('card logs-card');
+  filterCard.append($('<h3>').text('Filters'));
+  var filterGrid = $('<div>').addClass('logs-filter-grid');
+  filterGrid.append($('<label>').text('Last').append($('<select>').attr('id', 'logSinceDays')
+    .append($('<option>').attr('value', '1').text('24 hours'))
+    .append($('<option>').attr('value', '7').text('7 days'))
+    .append($('<option>').attr('value', '30').text('30 days'))
+    .append($('<option>').attr('value', '90').text('90 days'))
+    .append($('<option>').attr('value', 'all').text('All time')).val(String(logFilters.sinceDays || '7'))));
+  filterGrid.append($('<label>').text('Event').append($('<select>').attr('id', 'logEventType')
+    .append($('<option>').attr('value', 'all').text('All events'))
+    .append($('<option>').attr('value', 'login_success').text('Login success'))
+    .append($('<option>').attr('value', 'login_failed').text('Login failed'))
+    .append($('<option>').attr('value', 'login_throttled').text('Login throttled'))
+    .append($('<option>').attr('value', 'admin_login_success').text('Admin login success'))
+    .append($('<option>').attr('value', 'admin_login_failed').text('Admin login failed'))
+    .append($('<option>').attr('value', 'admin_login_throttled').text('Admin login throttled'))
+    .append($('<option>').attr('value', 'game_started').text('Game started'))
+    .append($('<option>').attr('value', 'password_reset_requested').text('Password reset'))
+    .append($('<option>').attr('value', 'influx_test').text('Influx test')).val(logFilters.eventType || 'all')));
+  filterGrid.append($('<label>').text('Status').append($('<select>').attr('id', 'logStatus')
+    .append($('<option>').attr('value', 'all').text('All statuses'))
+    .append($('<option>').attr('value', 'success').text('Success'))
+    .append($('<option>').attr('value', 'failed').text('Failed'))
+    .append($('<option>').attr('value', 'blocked').text('Blocked')).val(logFilters.status || 'all')));
+  filterGrid.append($('<label>').text('Username').append($('<input>').attr({id: 'logUsername', type: 'text', placeholder: 'eugene'}).val(logFilters.username || '')));
+  filterGrid.append($('<label>').text('Search').append($('<input>').attr({id: 'logSearch', type: 'text', placeholder: 'game, IP, console...'}).val(logFilters.search || '')));
+  filterCard.append(filterGrid);
+  filterCard.append($('<div>').addClass('logs-button-row')
+    .append($('<button>').addClass('button hover').attr('type', 'button').on('click', applyLogFilters).text('Apply Filters'))
+    .append($('<button>').addClass('button hover').attr('type', 'button').on('click', function() {
+      logFilters = {sinceDays: '7', eventType: 'all', status: 'all', username: '', search: '', limit: 200};
+      socket.emit('renderlogs', logFilters);
+    }).text('Reset')));
+  wrapper.append(filterCard);
+
+  var settingsCard = $('<div>').addClass('card logs-card');
+  settingsCard.append($('<h3>').text('Storage & Forwarding'));
+  var settingsGrid = $('<div>').addClass('logs-filter-grid');
+  settingsGrid.append($('<label>').text('Local logs enabled').append($('<input>').attr({id: 'localLogsEnabled', type: 'checkbox'}).prop('checked', settings.localLogsEnabled !== false)));
+  settingsGrid.append($('<label>').text('Retention (days)').append($('<input>').attr({id: 'localLogRetentionDays', type: 'number', min: 1, max: 3650}).val(settings.localLogRetentionDays || 90)));
+  settingsGrid.append($('<label>').text('Influx enabled').append($('<input>').attr({id: 'influxEnabled', type: 'checkbox'}).prop('checked', settings.influxEnabled === true)));
+  settingsGrid.append($('<label>').text('Influx URL').append($('<input>').attr({id: 'influxUrl', type: 'text', placeholder: 'https://influx.example.com'}).val(settings.influxUrl || '')));
+  settingsGrid.append($('<label>').text('Influx Org').append($('<input>').attr({id: 'influxOrg', type: 'text', placeholder: 'home'}).val(settings.influxOrg || '')));
+  settingsGrid.append($('<label>').text('Influx Bucket').append($('<input>').attr({id: 'influxBucket', type: 'text', placeholder: 'emulatorjs'}).val(settings.influxBucket || '')));
+  settingsGrid.append($('<label>').text('Influx Token').append($('<input>').attr({id: 'influxToken', type: 'password', placeholder: settings.influxTokenConfigured ? 'Token configured - leave blank to keep' : 'Paste new token'})));
+  settingsGrid.append($('<label>').text('Clear saved token').append($('<input>').attr({id: 'clearInfluxToken', type: 'checkbox'}).prop('checked', false)));
+  settingsCard.append(settingsGrid);
+  settingsCard.append($('<div>').addClass('logs-inline-note').text('Webhook destination: ' + (settings.webhookConfigured ? 'configured' : 'not configured') + '. Influx token stays on the server unless you save a new one.'));
+  settingsCard.append($('<div>').addClass('logs-button-row')
+    .append($('<button>').addClass('button hover').attr('type', 'button').on('click', saveLogSettings).text('Save Log Settings'))
+    .append($('<button>').addClass('button hover').attr('type', 'button').on('click', testInfluxSettings).text('Test Influx')));
+  wrapper.append(settingsCard);
+
+  var tableCard = $('<div>').addClass('card logs-card');
+  tableCard.append($('<h3>').text('Recent Events'));
+  var tableWrap = $('<div>').addClass('logs-table-wrap');
+  var table = $('<table>').addClass('logs-table');
+  table.append($('<thead>').append($('<tr>')
+    .append($('<th>').text('When'))
+    .append($('<th>').text('Event'))
+    .append($('<th>').text('User'))
+    .append($('<th>').text('Source'))
+    .append($('<th>').text('IP'))
+    .append($('<th>').text('Game / Details'))
+    .append($('<th>').text('View'))));
+  var body = $('<tbody>');
+  if (!events.length) {
+    body.append($('<tr>').append($('<td>').attr('colspan', 7).addClass('logs-empty').text('No events matched the current filters.')));
+  } else {
+    $.each(events, function(index, entry) {
+      var row = $('<tr>').attr('id', 'log-row-' + entry.id);
+      row.data('details', entry.details || {});
+      row.append($('<td>').text(entry.timestamp || ''));
+      row.append($('<td>').text((entry.title || entry.event_type || 'Event') + (entry.status ? ' (' + entry.status + ')' : '')));
+      row.append($('<td>').text(entry.username || '-'));
+      row.append($('<td>').text(entry.source || '-'));
+      row.append($('<td>').text(entry.ip || '-'));
+      row.append($('<td>').text(entry.game_name ? entry.game_name + (entry.console_title ? ' - ' + entry.console_title : '') : (entry.host || '-')));
+      row.append($('<td>').append($('<button>').addClass('button hover').attr('type', 'button').on('click', function() { openLogDetails(entry.id); }).text('Details')));
+      body.append(row);
+    });
+  }
+  table.append(body);
+  tableWrap.append(table);
+  tableCard.append(tableWrap);
+  wrapper.append(tableCard);
+  $('#main').append(wrapper);
 }
 
 // Render file management

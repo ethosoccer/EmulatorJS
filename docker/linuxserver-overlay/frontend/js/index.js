@@ -793,43 +793,50 @@ function renderVariantPanel() {
   var favoriteMode = variantPanelState.mode === 'favorite';
   $('#variant-panel-title').text(safeDecodeDisplayName(variantPanelState.title || (favoriteMode ? 'Choose a Favorite' : 'Choose a Version')));
   $('#variant-panel-status').text(favoriteMode
-    ? 'Pick which version you want in favorites.'
+    ? 'Pick a version to favorite, or click the title to launch it.'
     : variantPanelState.variants.length + ' version' + (variantPanelState.variants.length === 1 ? '' : 's') + ' available');
   $('#variant-panel-results').empty();
   for (var variant of variantPanelState.variants) {
     var row = $('<div>').addClass('variant-result-row');
     var button = $('<button>').addClass('variant-launch').attr('type', 'button');
-    if (favoriteMode) {
-      button.attr('onclick', 'toggleFavorite(event, this.getAttribute(\'data-favorite-id\'), this)');
-      button.attr('data-favorite-id', variant.id);
-      button.attr('data-favorite-name', variant.name);
-      button.attr('data-favorite-exact-name', variant.name);
-      button.attr('data-favorite-root', variant.root || variantPanelState.root || '');
-      button.attr('data-favorite-title', variant.title || variantPanelState.consoleTitle || '');
-      button.attr('data-favorite-index', Number(variant.index || 0));
-      button.attr('data-favorite-variant-count', '1');
-      button.attr('data-favorite-variant-choice', 'true');
-      button.toggleClass('is-favorite', isFavorite(variant.id));
-    } else {
-      button.attr('onclick', 'launch(this)');
-      button.attr('data-variant-choice', 'true');
-      button.attr('data-group-display-name', variantPanelState.title || variant.displayName || variant.name);
-      button.attr('data-close-variant-panel', 'true');
-      button.attr('data-parent-root', variantPanelState.root || '');
-      button.attr('data-parent-title', variantPanelState.consoleTitle || '');
-      button.attr('data-group-key', variantPanelState.groupKey || '');
-      button.attr('data-variant-label', variantSummary(variant));
-      button.attr('data-variant-count', '1');
-      button.attr('data-display-name', variant.displayName || variant.name);
-      button.attr('data-name', variant.name);
-      button.attr('data-original-index', Number(variant.index || 0));
-      for (var key of defaultKeys) {
-        button.attr('data-' + key, String(variant.resolved[key] || ''));
-      }
+    button.attr('onclick', 'launch(this)');
+    button.attr('data-variant-choice', 'true');
+    button.attr('data-group-display-name', variantPanelState.title || variant.displayName || variant.name);
+    button.attr('data-close-variant-panel', 'true');
+    button.attr('data-parent-root', variantPanelState.root || '');
+    button.attr('data-parent-title', variantPanelState.consoleTitle || '');
+    button.attr('data-group-key', variantPanelState.groupKey || '');
+    button.attr('data-variant-label', variantSummary(variant));
+    button.attr('data-variant-count', '1');
+    button.attr('data-display-name', variant.displayName || variant.name);
+    button.attr('data-name', variant.name);
+    button.attr('data-original-index', Number(variant.index || 0));
+    for (var key of defaultKeys) {
+      button.attr('data-' + key, String(variant.resolved[key] || ''));
     }
-    button.append($('<span>').addClass('variant-launch-title').text((favoriteMode && isFavorite(variant.id) ? '♥ ' : '') + safeDecodeDisplayName(variant.name)));
+    button.append($('<span>').addClass('variant-launch-title').text(safeDecodeDisplayName(variant.name)));
     button.append($('<span>').addClass('variant-launch-meta').text(variantSummary(variant)));
-    row.append(button);
+    var favoriteButton = $('<button>')
+      .addClass('variant-favorite')
+      .attr('type', 'button')
+      .attr('title', isFavorite(variant.id) ? 'Remove from favorites' : 'Add to favorites')
+      .attr('aria-label', isFavorite(variant.id) ? 'Remove from favorites' : 'Add to favorites')
+      .attr('data-favorite-id', variant.id)
+      .attr('data-favorite-name', variant.name)
+      .attr('data-favorite-exact-name', variant.name)
+      .attr('data-favorite-root', variant.root || variantPanelState.root || '')
+      .attr('data-favorite-title', variant.title || variantPanelState.consoleTitle || '')
+      .attr('data-favorite-index', Number(variant.index || 0))
+      .attr('data-favorite-variant-count', '1')
+      .attr('data-favorite-variant-choice', favoriteMode ? 'true' : 'false')
+      .toggleClass('is-favorite', isFavorite(variant.id))
+      .text('♥');
+    favoriteButton.on('click', function(favoriteId, element) {
+      return function(event) {
+        toggleFavorite(event, favoriteId, element);
+      };
+    }(variant.id, favoriteButton.get(0)));
+    row.append(button, favoriteButton);
     $('#variant-panel-results').append(row);
   }
   $('#variant-panel').removeClass('hidden');
@@ -1334,6 +1341,16 @@ function refreshFavoriteButtons() {
     $(this).attr('aria-pressed', active);
     $(this).attr('title', active ? 'Remove from favorites' : 'Add to favorites');
   });
+  $('.variant-favorite').each(function() {
+    var active = isFavorite(this.dataset.favoriteId);
+    $(this).toggleClass('is-favorite', active);
+    $(this).attr('aria-pressed', active);
+    $(this).attr('title', active ? 'Remove from favorites' : 'Add to favorites');
+    $(this).attr('aria-label', active ? 'Remove from favorites' : 'Add to favorites');
+  });
+  $('.favorite-indicator').each(function() {
+    $(this).toggleClass('is-favorite', true);
+  });
 }
 function setSaveButtonState(saveBase, hasSaves) {
   $('.save-toggle').filter(function() {
@@ -1469,7 +1486,7 @@ function renderFavoritesPanel() {
     var openButton = $('<button>').addClass('search-result').attr('type', 'button').attr('onclick', 'openFavoriteResult("' + item.id + '")');
     openButton.append($('<span>').addClass('search-result-title').html('&hearts; ' + escapeHtml(cleanGameName(item.name, item.id))));
     openButton.append($('<span>').addClass('search-result-meta').text(item.title || item.root || 'Games'));
-    var removeButton = $('<button>').addClass('favorite-remove').attr('type', 'button').attr('title', 'Remove from favorites').text('Remove');
+    var removeButton = $('<button>').addClass('favorite-remove favorite-indicator is-favorite').attr('type', 'button').attr('title', 'Remove from favorites').attr('aria-label', 'Remove from favorites').text('♥');
     removeButton.on('click', function(favoriteId) {
       return function(event) {
         toggleFavorite(event, favoriteId);

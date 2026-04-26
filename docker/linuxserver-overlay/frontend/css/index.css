@@ -327,6 +327,34 @@ body.profile-required .login-panel {
   font-size: 13px;
 }
 
+.variant-favorite,
+.favorite-indicator {
+  min-width: 44px;
+  width: 44px;
+  border: 1px solid rgba(255, 255, 255, .28);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, .34);
+  color: rgba(255, 255, 255, .88);
+  cursor: pointer;
+  font: inherit;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.variant-favorite:hover,
+.variant-favorite:focus-visible,
+.favorite-indicator:hover,
+.favorite-indicator:focus-visible {
+  background: rgba(255, 255, 255, .14);
+}
+
+.variant-favorite.is-favorite,
+.favorite-indicator.is-favorite {
+  border-color: #ffcf6b;
+  background: rgba(255, 207, 107, .18);
+  color: #ffcf6b;
+}
+
 body.profile-required .login-panel {
   position: fixed;
   top: 50%;

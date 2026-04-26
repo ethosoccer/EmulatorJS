@@ -105,6 +105,7 @@ function getFavorites() {
         return favorite && favorite.id && favorite.id !== 'undefined' && favorite.id.indexOf('undefined::') !== 0;
       }).map(function(favorite) {
         favorite.name = cleanGameName(favorite.name, favorite.id);
+        favorite.exactName = hasUsableValue(favorite.exactName) ? favorite.exactName : favorite.name;
         favorite.root = hasUsableValue(favorite.root) ? favorite.root : 'main';
         favorite.title = hasUsableValue(favorite.title) ? favorite.title : 'Games';
         favorite.index = Number(favorite.index || 0);
@@ -789,35 +790,51 @@ function renderVariantPanel() {
     closeVariantPanel();
     return;
   }
-  $('#variant-panel-title').text(safeDecodeDisplayName(variantPanelState.title || 'Choose a Version'));
-  $('#variant-panel-status').text(variantPanelState.variants.length + ' version' + (variantPanelState.variants.length === 1 ? '' : 's') + ' available');
+  var favoriteMode = variantPanelState.mode === 'favorite';
+  $('#variant-panel-title').text(safeDecodeDisplayName(variantPanelState.title || (favoriteMode ? 'Choose a Favorite' : 'Choose a Version')));
+  $('#variant-panel-status').text(favoriteMode
+    ? 'Pick which version you want in favorites.'
+    : variantPanelState.variants.length + ' version' + (variantPanelState.variants.length === 1 ? '' : 's') + ' available');
   $('#variant-panel-results').empty();
   for (var variant of variantPanelState.variants) {
     var row = $('<div>').addClass('variant-result-row');
     var button = $('<button>').addClass('variant-launch').attr('type', 'button');
-    button.attr('onclick', 'launch(this)');
-    button.attr('data-variant-choice', 'true');
-    button.attr('data-group-display-name', variantPanelState.title || variant.displayName || variant.name);
-    button.attr('data-close-variant-panel', 'true');
-    button.attr('data-parent-root', variantPanelState.root || '');
-    button.attr('data-parent-title', variantPanelState.consoleTitle || '');
-    button.attr('data-group-key', variantPanelState.groupKey || '');
-    button.attr('data-variant-label', variantSummary(variant));
-    button.attr('data-variant-count', '1');
-    button.attr('data-display-name', variant.displayName || variant.name);
-    button.attr('data-name', variant.name);
-    button.attr('data-original-index', Number(variant.index || 0));
-    for (var key of defaultKeys) {
-      button.attr('data-' + key, String(variant.resolved[key] || ''));
+    if (favoriteMode) {
+      button.attr('onclick', 'toggleFavorite(event, this.getAttribute(\'data-favorite-id\'), this)');
+      button.attr('data-favorite-id', variant.id);
+      button.attr('data-favorite-name', variant.name);
+      button.attr('data-favorite-exact-name', variant.name);
+      button.attr('data-favorite-root', variant.root || variantPanelState.root || '');
+      button.attr('data-favorite-title', variant.title || variantPanelState.consoleTitle || '');
+      button.attr('data-favorite-index', Number(variant.index || 0));
+      button.attr('data-favorite-variant-count', '1');
+      button.attr('data-favorite-variant-choice', 'true');
+      button.toggleClass('is-favorite', isFavorite(variant.id));
+    } else {
+      button.attr('onclick', 'launch(this)');
+      button.attr('data-variant-choice', 'true');
+      button.attr('data-group-display-name', variantPanelState.title || variant.displayName || variant.name);
+      button.attr('data-close-variant-panel', 'true');
+      button.attr('data-parent-root', variantPanelState.root || '');
+      button.attr('data-parent-title', variantPanelState.consoleTitle || '');
+      button.attr('data-group-key', variantPanelState.groupKey || '');
+      button.attr('data-variant-label', variantSummary(variant));
+      button.attr('data-variant-count', '1');
+      button.attr('data-display-name', variant.displayName || variant.name);
+      button.attr('data-name', variant.name);
+      button.attr('data-original-index', Number(variant.index || 0));
+      for (var key of defaultKeys) {
+        button.attr('data-' + key, String(variant.resolved[key] || ''));
+      }
     }
-    button.append($('<span>').addClass('variant-launch-title').text(safeDecodeDisplayName(variant.name)));
+    button.append($('<span>').addClass('variant-launch-title').text((favoriteMode && isFavorite(variant.id) ? '♥ ' : '') + safeDecodeDisplayName(variant.name)));
     button.append($('<span>').addClass('variant-launch-meta').text(variantSummary(variant)));
     row.append(button);
     $('#variant-panel-results').append(row);
   }
   $('#variant-panel').removeClass('hidden');
 }
-function openVariantPanel(entry) {
+function openVariantPanel(entry, options) {
   if (!entry || !entry.variants || entry.variants.length <= 1) {
     return;
   }
@@ -830,7 +847,8 @@ function openVariantPanel(entry) {
     groupKey: entry.groupKey || '',
     root: entry.root || '',
     consoleTitle: entry.title || '',
-    variants: entry.variants.slice()
+    variants: entry.variants.slice(),
+    mode: options && options.mode || 'launch'
   };
   renderVariantPanel();
 }
@@ -1284,6 +1302,7 @@ function readFavoriteRecord(button, favoriteId) {
   return {
     id: favoriteId,
     name: cleanGameName($button.attr('data-favorite-name'), favoriteId),
+    exactName: $button.attr('data-favorite-exact-name') || cleanGameName($button.attr('data-favorite-name'), favoriteId),
     root: $button.attr('data-favorite-root') || 'main',
     title: $button.attr('data-favorite-title') || 'Games',
     index: Number($button.attr('data-favorite-index') || 0)
@@ -1292,11 +1311,25 @@ function readFavoriteRecord(button, favoriteId) {
 function isFavorite(favoriteId) {
   return getFavoriteIds().indexOf(favoriteId) !== -1;
 }
-function setFavoriteButtonState(favoriteId) {
-  $('.favorite-toggle').filter(function() {
-    return this.dataset.favoriteId === favoriteId;
-  }).each(function() {
-    var active = isFavorite(favoriteId);
+function favoriteIdsForButton(button) {
+  var $button = $(button);
+  var count = Number($button.attr('data-favorite-variant-count') || 1);
+  var menuIndex = Number($button.attr('data-menu-index'));
+  var entries = $('#menu').data('menuEntries') || [];
+  var entry = !isNaN(menuIndex) ? entries[menuIndex] : null;
+  if (count > 1 && entry && entry.variants) {
+    return entry.variants.map(function(variant) {
+      return variant.id;
+    });
+  }
+  return [$button.attr('data-favorite-id')];
+}
+function refreshFavoriteButtons() {
+  $('.favorite-toggle').each(function() {
+    var ids = favoriteIdsForButton(this);
+    var active = ids.some(function(id) {
+      return isFavorite(id);
+    });
     $(this).toggleClass('is-favorite', active);
     $(this).attr('aria-pressed', active);
     $(this).attr('title', active ? 'Remove from favorites' : 'Add to favorites');
@@ -1326,6 +1359,15 @@ function toggleFavorite(event, favoriteId, button) {
     event.preventDefault();
     event.stopPropagation();
   }
+  var $button = $(button);
+  var variantCount = Number($button.attr('data-favorite-variant-count') || 1);
+  var menuIndex = Number($button.attr('data-menu-index'));
+  var entries = $('#menu').data('menuEntries') || [];
+  var entry = !isNaN(menuIndex) ? entries[menuIndex] : null;
+  if (variantCount > 1 && !$button.attr('data-favorite-variant-choice') && entry && entry.variants) {
+    openVariantPanel(entry, {mode: 'favorite'});
+    return;
+  }
   if (!favoriteId || favoriteId === 'undefined') {
     return;
   }
@@ -1340,12 +1382,15 @@ function toggleFavorite(event, favoriteId, button) {
     favorites.splice(index, 1);
   }
   saveFavorites(favorites);
-  setFavoriteButtonState(favoriteId);
+  refreshFavoriteButtons();
   if (!$('#search-panel').hasClass('hidden')) {
     runGameSearch();
   }
   if (!$('#favorites-panel').hasClass('hidden')) {
     renderFavoritesPanel();
+  }
+  if ($button.attr('data-favorite-variant-choice')) {
+    closeVariantPanel();
   }
   queueProfilePush();
 }
@@ -1421,9 +1466,7 @@ function renderFavoritesPanel() {
   $('#favorites-status').text(favoriteItems.length + ' favorite' + (favoriteItems.length === 1 ? '' : 's'));
   for (var item of favoriteItems) {
     var row = $('<div>').addClass('favorite-result-row');
-    var root = item.root || 'main';
-    var index = Number(item.index || 0);
-    var openButton = $('<button>').addClass('search-result').attr('type', 'button').attr('onclick', 'openFavoriteResult("' + root + '",' + index + ')');
+    var openButton = $('<button>').addClass('search-result').attr('type', 'button').attr('onclick', 'openFavoriteResult("' + item.id + '")');
     openButton.append($('<span>').addClass('search-result-title').html('&hearts; ' + escapeHtml(cleanGameName(item.name, item.id))));
     openButton.append($('<span>').addClass('search-result-meta').text(item.title || item.root || 'Games'));
     var removeButton = $('<button>').addClass('favorite-remove').attr('type', 'button').attr('title', 'Remove from favorites').text('Remove');
@@ -1788,9 +1831,33 @@ function openSearchResult(root, index) {
     window.location.href = target;
   }
 }
-function openFavoriteResult(root, index) {
+async function openFavoriteResult(favoriteId) {
   closeFavoritesPanel();
-  openSearchResult(root, index);
+  var favorite = getFavorites().find(function(entry) {
+    return entry.id === favoriteId;
+  });
+  if (!favorite) {
+    return;
+  }
+  var root = favorite.root || 'main';
+  var config = await fetchConfig(root);
+  if (!config || !config.items || !config.items[favorite.exactName]) {
+    openSearchResult(root, Number(favorite.index || 0));
+    return;
+  }
+  $('#menu').data('config', config);
+  $('#menu').data('root', root);
+  var resolved = resolveItem(config.items[favorite.exactName], config.defaults || {});
+  var temp = $('<button>');
+  temp.attr('data-name', favorite.exactName);
+  temp.attr('data-display-name', favorite.name || favorite.exactName);
+  temp.attr('data-group-display-name', favorite.name || favorite.exactName);
+  temp.attr('data-original-index', Number(favorite.index || 0));
+  temp.attr('data-close-variant-panel', 'true');
+  for (var key of defaultKeys) {
+    temp.attr('data-' + key, String(resolved[key] || ''));
+  }
+  launch(temp);
 }
 function clearConsoleListFilter() {
   $('#console-list-search').val('').trigger('input');
@@ -2259,7 +2326,7 @@ async function rendermenu(datas) {
     if (itemType == 'game') {
       saveButton = '<button class="save-toggle hidden" type="button" data-save-base="' + escapeHtml(saveBase) + '" data-save-name="' + escapeHtml(favoriteName) + '" onclick="openGameSaves(event, this.getAttribute(\'data-save-name\'), this.getAttribute(\'data-save-base\'))" aria-label="Download saves" title="No local saves found">&#128190;</button>';
       romDownloadButton = '<button class="rom-download-toggle" type="button" data-rom-path="' + escapeHtml(itemPath) + '" data-rom-name="' + escapeHtml(romName) + '" data-rom-extension="' + escapeHtml(item.hasOwnProperty('rom_extension') ? item.rom_extension : data.defaults.rom_extension || '') + '" onclick="downloadRom(event, this)" aria-label="Download ROM" title="Download ROM">&#10515;</button>';
-      favoriteButton = '<button class="favorite-toggle" type="button" data-favorite-id="' + escapeHtml(favoriteId) + '" data-favorite-name="' + escapeHtml(favoriteName) + '" data-favorite-root="' + escapeHtml(root) + '" data-favorite-title="' + escapeHtml(itemTitle) + '" data-favorite-index="' + entry.originalIndex + '" onclick="toggleFavorite(event, this.getAttribute(\'data-favorite-id\'), this)" aria-label="Toggle favorite" title="Add to favorites">&hearts;</button>';
+      favoriteButton = '<button class="favorite-toggle" type="button" data-menu-index="' + count + '" data-favorite-id="' + escapeHtml(favoriteId) + '" data-favorite-name="' + escapeHtml(favoriteName) + '" data-favorite-exact-name="' + escapeHtml(romName) + '" data-favorite-root="' + escapeHtml(root) + '" data-favorite-title="' + escapeHtml(itemTitle) + '" data-favorite-index="' + entry.originalIndex + '" data-favorite-variant-count="' + (entry.variantCount || 1) + '" onclick="toggleFavorite(event, this.getAttribute(\'data-favorite-id\'), this)" aria-label="Toggle favorite" title="Add to favorites">&hearts;</button>';
     }
     return '\
       <div id="m' + count + '">\
@@ -2284,9 +2351,7 @@ async function rendermenu(datas) {
         $('#games-list').append(buildMenuEntry(filteredEntries[itemIndex], itemIndex));
       }
     }
-    for (var favoriteId of getFavoriteIds()) {
-      setFavoriteButtonState(favoriteId);
-    }
+    refreshFavoriteButtons();
     refreshSaveIndicators();
     $('.menu-img').css({'max-height': image_height});
     if (portrait !== 0) {

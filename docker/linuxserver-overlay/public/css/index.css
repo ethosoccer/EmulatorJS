@@ -570,6 +570,71 @@ button:focus-visible {
   gap: 4px;
 }
 
+.scan-modal {
+  display: grid;
+  gap: 14px;
+  min-height: 100%;
+}
+
+.scan-modal h2,
+.scan-modal p {
+  margin: 0;
+}
+
+.scan-modal-copy {
+  color: var(--muted);
+}
+
+.scan-modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.scan-job-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-soft);
+}
+
+.scan-job-summary > div {
+  display: grid;
+  gap: 4px;
+}
+
+.scan-job-summary strong {
+  font-size: 12px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.scan-job-error {
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--danger-bg) 75%, var(--panel));
+  color: var(--text);
+}
+
+.scan-job-log {
+  margin: 0;
+  padding: 14px;
+  min-height: 280px;
+  max-height: calc(100vh - 260px);
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-soft);
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .logs-cell-subtle {
   color: var(--muted);
   font-size: 12px;

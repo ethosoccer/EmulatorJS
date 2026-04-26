@@ -1,4 +1,4 @@
-var host = window.location.hostname; 
+var host = window.location.hostname;
 var port = window.location.port;
 var protocol = window.location.protocol;
 var path = window.location.pathname;
@@ -8,6 +8,9 @@ var logFilters = {sinceDays: '7', eventType: 'all', status: 'all', username: '',
 var logTimezoneStorageKey = 'ejs-admin-log-timezone';
 var browserTimezone = (Intl && Intl.DateTimeFormat().resolvedOptions().timeZone) || 'UTC';
 var logTimezone = localStorage.getItem(logTimezoneStorageKey) || browserTimezone;
+var scanJobsState = [];
+var activeScanJobId = '';
+var scanLauncherConfig = null;
 
 function getLogTimezoneOptions() {
   var options = ['UTC'];
@@ -92,7 +95,7 @@ function formatLogLocation(entry) {
     extra.push(postal);
   }
   if (extra.length) {
-    cell.append($('<div>').addClass('logs-cell-subtle').text(extra.join(' · ')));
+    cell.append($('<div>').addClass('logs-cell-subtle').text(extra.join(' | ')));
   }
   return cell;
 }
@@ -250,6 +253,29 @@ socket.on('renderfiledirs', renderFileDirs);
 // Render file directories
 socket.on('renderprofiles', renderProfiles);
 socket.on('renderlogs', renderLogsPage);
+socket.on('renderscans', renderScansPage);
+socket.on('scanjobs', function(jobs) {
+  scanJobsState = Array.isArray(jobs) ? jobs : [];
+  if ($('#main').data('view') === 'scans') {
+    renderScansPage(scanJobsState);
+  }
+  if (activeScanJobId) {
+    var activeJob = getScanJob(activeScanJobId);
+    if (activeJob) {
+      renderScanJobModal(activeJob);
+    }
+  }
+});
+socket.on('scanjobstarted', function(payload) {
+  payload = payload || {};
+  if (payload.job && payload.job.id) {
+    activeScanJobId = payload.job.id;
+    openScanJobModal(payload.job.id);
+  }
+  if (payload.message) {
+    $('#logs-status').text(payload.message);
+  }
+});
 socket.on('influxtest', function(result) {
   var ok = result && result.status === 'success';
   $('#logs-status').text(ok ? 'Influx test event sent.' : 'Influx test failed.');
@@ -334,7 +360,218 @@ function renderProfile() {
 }
 
 function renderLogsView() {
+  $('#main').data('view', 'logs');
   socket.emit('renderlogs', logFilters);
+}
+
+function renderScansView() {
+  $('#main').data('view', 'scans');
+  socket.emit('renderscans');
+}
+
+function getScanJob(scanId) {
+  for (var job of scanJobsState) {
+    if (String(job.id) === String(scanId)) {
+      return job;
+    }
+  }
+  return null;
+}
+
+function scanTypeLabel(type) {
+  if (type === 'rom-scan') {
+    return 'ROM Scan';
+  }
+  if (type === 'art-download') {
+    return 'Download Art';
+  }
+  if (type === 'default-files') {
+    return 'Default Files';
+  }
+  return type || 'Scan';
+}
+
+function scanModeLabel(mode) {
+  if (mode === 'all') {
+    return 'All items';
+  }
+  if (mode === 'new') {
+    return 'New items only';
+  }
+  if (mode === 'update') {
+    return 'Update';
+  }
+  return mode || 'Default';
+}
+
+function scanStatusLabel(status) {
+  if (status === 'running') {
+    return 'Running';
+  }
+  if (status === 'canceling') {
+    return 'Canceling';
+  }
+  if (status === 'completed') {
+    return 'Completed';
+  }
+  if (status === 'canceled') {
+    return 'Canceled';
+  }
+  if (status === 'failed') {
+    return 'Failed';
+  }
+  return status || 'Pending';
+}
+
+function openScanLauncher(config) {
+  scanLauncherConfig = config || null;
+  activeScanJobId = '';
+  emptyModal();
+  var card = $('<div>').addClass('scan-modal');
+  card.append($('<h2>').text(config.title || 'Start Scan'));
+  if (config.description) {
+    card.append($('<p>').addClass('scan-modal-copy').text(config.description));
+  }
+  if (config.dir) {
+    card.append($('<p>').addClass('scan-modal-copy').text('Target: ' + config.dir));
+  }
+  if (config.type === 'rom-scan' && config.preferredRegion) {
+    card.append($('<p>').addClass('scan-modal-copy').text('Preferred region: ' + config.preferredRegion));
+  }
+  var actions = $('<div>').addClass('scan-modal-actions');
+  if (config.allowModes) {
+    actions.append($('<button>').addClass('button hover').attr('type', 'button').on('click', function() {
+      startScanJob(config.defaultMode === 'all' ? 'all' : 'new');
+    }).text(config.primaryLabel || 'Scan New Items'));
+    actions.append($('<button>').addClass('button hover').attr('type', 'button').on('click', function() {
+      startScanJob('all');
+    }).text(config.secondaryLabel || 'Scan All Items'));
+  } else {
+    actions.append($('<button>').addClass('button hover').attr('type', 'button').on('click', function() {
+      startScanJob(config.mode || 'update');
+    }).text(config.primaryLabel || 'Start'));
+  }
+  actions.append($('<button>').addClass('button hover').attr('type', 'button').on('click', closeModal).text('Close'));
+  card.append(actions);
+  $('#modal-content').append(card);
+  showModal();
+}
+
+function startScanJob(mode) {
+  if (!scanLauncherConfig) {
+    return;
+  }
+  var payload = {
+    type: scanLauncherConfig.type,
+    dir: scanLauncherConfig.dir || '',
+    mode: mode || scanLauncherConfig.mode || '',
+    preferredRegion: scanLauncherConfig.preferredRegion || ''
+  };
+  $('#modal-content').empty().append($('<div>').addClass('loader'));
+  socket.emit('startscanjob', payload);
+}
+
+function renderScanJobModal(job) {
+  if (!job) {
+    return;
+  }
+  activeScanJobId = job.id;
+  emptyModal();
+  var card = $('<div>').addClass('scan-modal');
+  card.append($('<h2>').text(job.label || scanTypeLabel(job.type)));
+  var summary = $('<div>').addClass('scan-job-summary');
+  summary.append($('<div>').append($('<strong>').text('Status')).append($('<span>').text(scanStatusLabel(job.status))));
+  summary.append($('<div>').append($('<strong>').text('Mode')).append($('<span>').text(scanModeLabel(job.mode))));
+  summary.append($('<div>').append($('<strong>').text('Started')).append($('<span>').text(formatLogTimestamp(job.startedAt, logTimezone))));
+  if (job.endedAt) {
+    summary.append($('<div>').append($('<strong>').text('Ended')).append($('<span>').text(formatLogTimestamp(job.endedAt, logTimezone))));
+  }
+  card.append(summary);
+  if (job.error) {
+    card.append($('<div>').addClass('scan-job-error').text(job.error));
+  }
+  var actions = $('<div>').addClass('scan-modal-actions');
+  actions.append($('<button>').addClass('button hover').attr('type', 'button').on('click', function() {
+    renderScansView();
+  }).text('View All Scans'));
+  if (job.status === 'running' || job.status === 'canceling') {
+    actions.append($('<button>').addClass('button hover').attr('type', 'button').on('click', function() {
+      cancelScanJob(job.id);
+    }).text('Cancel Scan'));
+  }
+  actions.append($('<button>').addClass('button hover').attr('type', 'button').on('click', closeModal).text('Close'));
+  card.append(actions);
+  card.append($('<pre>').addClass('scan-job-log').text((job.logs || []).join('\n') || 'No output yet.'));
+  $('#modal-content').append(card);
+  showModal();
+}
+
+function openScanJobModal(scanId) {
+  var job = getScanJob(scanId);
+  if (!job) {
+    return;
+  }
+  renderScanJobModal(job);
+}
+
+function cancelScanJob(scanId) {
+  socket.emit('cancelscanjob', scanId);
+}
+
+function renderScansPage(jobs) {
+  jobs = Array.isArray(jobs) ? jobs : scanJobsState;
+  scanJobsState = jobs;
+  $('#main').data('view', 'scans');
+  $('#main').empty();
+  $('#side').empty();
+  $('#nav-buttons').empty();
+  var wrapper = $('<div>').addClass('logs-page');
+  wrapper.append($('<div>').addClass('logs-header')
+    .append($('<div>').append($('<h1>').text('Scans')).append($('<p>').addClass('logs-subtitle').text('View all scan jobs, reopen progress, and cancel active work.')))
+    .append($('<div>').addClass('logs-status').text(jobs.filter(function(job) {
+      return job.status === 'running' || job.status === 'canceling';
+    }).length + ' active')));
+  if (!jobs.length) {
+    wrapper.append($('<div>').addClass('card logs-card').append($('<p>').addClass('logs-empty').text('No scans have run yet.')));
+    $('#main').append(wrapper);
+    return;
+  }
+  var tableCard = $('<div>').addClass('card logs-card');
+  tableCard.append($('<h3>').text('Scan Jobs'));
+  var tableWrap = $('<div>').addClass('logs-table-wrap');
+  var table = $('<table>').addClass('logs-table');
+  table.append($('<thead>').append($('<tr>')
+    .append($('<th>').text('When'))
+    .append($('<th>').text('Type'))
+    .append($('<th>').text('Target'))
+    .append($('<th>').text('Mode'))
+    .append($('<th>').text('Status'))
+    .append($('<th>').text('Actions'))));
+  var body = $('<tbody>');
+  jobs.forEach(function(job) {
+    var row = $('<tr>');
+    row.append($('<td>').text(formatLogTimestamp(job.startedAt, logTimezone)));
+    row.append($('<td>').text(scanTypeLabel(job.type)));
+    row.append($('<td>').text(job.dir || 'default'));
+    row.append($('<td>').text(scanModeLabel(job.mode)));
+    row.append($('<td>').text(scanStatusLabel(job.status)));
+    var actions = $('<div>').addClass('logs-button-row');
+    actions.append($('<button>').addClass('button hover').attr('type', 'button').on('click', function() {
+      openScanJobModal(job.id);
+    }).text('Open'));
+    if (job.status === 'running' || job.status === 'canceling') {
+      actions.append($('<button>').addClass('button hover').attr('type', 'button').on('click', function() {
+        cancelScanJob(job.id);
+      }).text('Cancel'));
+    }
+    row.append($('<td>').append(actions));
+    body.append(row);
+  });
+  table.append(body);
+  tableWrap.append(table);
+  tableCard.append(tableWrap);
+  wrapper.append(tableCard);
+  $('#main').append(wrapper);
 }
 
 // Render roms landing page
@@ -376,18 +613,31 @@ function renderRoms() {
 
 // Scan in a roms directory
 function scanRoms(folder) {
-  socket.emit('scanroms', [folder, true, getPreferredRegion(folder)]);
-  $('#modal').toggle(100);
+  openScanLauncher({
+    type: 'rom-scan',
+    dir: folder,
+    title: 'Scan ROMs',
+    description: 'Choose whether to scan every ROM in this system or only items that have not been scanned yet.',
+    allowModes: true,
+    primaryLabel: 'Scan New Items',
+    secondaryLabel: 'Scan All Items',
+    preferredRegion: getPreferredRegion(folder)
+  });
 }
 
 // Scan in a roms directory
 function newScan(folder) {
-  var choice = prompt('Type "all" to scan all items, or press OK/Enter to scan only new items.', 'new');
-  if (choice === null) {
-    return;
-  }
-  socket.emit('scanroms', [folder, choice.toLowerCase() === 'all', getPreferredRegion(folder)]);
-  $('#modal').toggle(100);
+  openScanLauncher({
+    type: 'rom-scan',
+    dir: folder,
+    title: 'Scan ROMs',
+    description: 'This will focus on new or rescanned items by default. You can still choose a full scan if you want.',
+    allowModes: true,
+    primaryLabel: 'Scan New Items',
+    secondaryLabel: 'Scan All Items',
+    defaultMode: 'new',
+    preferredRegion: getPreferredRegion(folder)
+  });
 }
 
 // Link metadata for selected rom
@@ -407,7 +657,7 @@ function setMeta() {
 
 // Send output to modal
 function modalData(data) {
-  $('#modal-content').prepend('<p>' + data + '</p>'); 
+  $('#modal-content').prepend('<p>' + data + '</p>');
 }
 
 // Empty modal
@@ -421,6 +671,7 @@ function showModal() {
 
 // Close modal
 function closeModal() {
+  scanLauncherConfig = null;
   emptyModal();
   $('#modal').hide()
 }
@@ -477,7 +728,7 @@ function addToConfig(name) {
     return;
   }
   $('#main').empty();
-  $('#main').append('<div class="loader"></div>'); 
+  $('#main').append('<div class="loader"></div>');
   socket.emit('addtoconfig', name);
 }
 
@@ -490,22 +741,29 @@ function purgeNoArt(name) {
 
 // Download art for all identified roms
 function downloadArt(name) {
-  var choice = prompt('Type "all" to download art for all identified items, or press OK/Enter to process only new items.', 'new');
-  if (choice === null) {
-    return;
-  }
-  $('#main').empty();
-  $('#main').append('<div class="loader"></div>');
-  showModal();
-  socket.emit('downloadart', [name, choice.toLowerCase() === 'all']);
+  openScanLauncher({
+    type: 'art-download',
+    dir: name,
+    title: 'Download Available Art',
+    description: 'Choose whether to process everything or only new items. Existing downloads and prior failures are skipped during new-only runs.',
+    allowModes: true,
+    primaryLabel: 'Download New Items',
+    secondaryLabel: 'Download All Items',
+    defaultMode: 'new'
+  });
 }
 
 // Tell server to download the default file set
 function dlDefaultFiles() {
-  $('#main').empty();
-  $('#main').append('<div class="loader"></div>');
-  $('#modal').toggle(100);
-  socket.emit('dldefaultfiles');
+  openScanLauncher({
+    type: 'default-files',
+    dir: 'default',
+    title: 'Download / Update Default Files',
+    description: 'This updates the shared default fileset and refreshes generated configs for systems that already have scanned ROMs.',
+    allowModes: false,
+    primaryLabel: 'Start Update',
+    mode: 'update'
+  });
 }
 
 // Render in a config file
@@ -622,6 +880,24 @@ async function renderRomData(data) {
   let fileLink = $('<a>').attr('href', basePath + dir + '/roms/' + data.file).text(data.file);
   let fileName = $('<p>').text('Rom File: ').append(fileLink);
   manage.append(fileName);
+  if (data.variantInfo) {
+    if (data.variantInfo.title && data.variantInfo.title !== data.file) {
+      manage.append($('<p>').text('Parsed Title: ' + data.variantInfo.title));
+    }
+    if (data.variantInfo.region) {
+      manage.append($('<p>').text('Region: ' + data.variantInfo.region));
+    }
+    if (data.variantInfo.version) {
+      manage.append($('<p>').text('Version: ' + data.variantInfo.version));
+    }
+    if (Array.isArray(data.variantInfo.codeTooltips) && data.variantInfo.codeTooltips.length) {
+      let list = $('<ul>').addClass('variant-code-list');
+      data.variantInfo.codeTooltips.forEach(function(code) {
+        list.append($('<li>').text(code.code + ': ' + code.description));
+      });
+      manage.append($('<div>').append($('<p>').text('GoodTools codes:')).append(list));
+    }
+  }
   if (data.metadata.hasOwnProperty('name')) {
     let name = $('<p>').text('Meta Name: ' + data.metadata.name);
     manage.append(name);
@@ -744,7 +1020,7 @@ function unIdentify(purge) {
   closeModal();
   $('#main').empty();
   $('#main').append('<div class="loader"></div>');
-  socket.emit('removemeta', [hash, dir, file, purge]); 
+  socket.emit('removemeta', [hash, dir, file, purge]);
 }
 
 function clearScanFlag() {
@@ -1095,4 +1371,3 @@ function deleteProfile(user) {
   $('#main').append('<div class="loader"></div>');
   socket.emit('deleteprofile', user);
 }
-

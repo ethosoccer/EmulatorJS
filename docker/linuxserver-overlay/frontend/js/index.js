@@ -799,6 +799,7 @@ function renderVariantPanel() {
   for (var variant of variantPanelState.variants) {
     var row = $('<div>').addClass('variant-result-row');
     var button = $('<button>').addClass('variant-launch').attr('type', 'button');
+    var tooltipText = variantTooltipText(variant);
     button.attr('onclick', 'launch(this)');
     button.attr('data-variant-choice', 'true');
     button.attr('data-group-display-name', variantPanelState.title || variant.displayName || variant.name);
@@ -811,6 +812,9 @@ function renderVariantPanel() {
     button.attr('data-display-name', variant.displayName || variant.name);
     button.attr('data-name', variant.name);
     button.attr('data-original-index', Number(variant.index || 0));
+    if (tooltipText) {
+      button.attr('title', tooltipText);
+    }
     for (var key of defaultKeys) {
       button.attr('data-' + key, String(variant.resolved[key] || ''));
     }
@@ -831,6 +835,9 @@ function renderVariantPanel() {
       .attr('data-favorite-variant-choice', favoriteMode ? 'true' : 'false')
       .toggleClass('is-favorite', isFavorite(variant.id))
       .html('&hearts;');
+    if (tooltipText) {
+      favoriteButton.attr('title', (favoriteButton.attr('title') || '') + '\n' + tooltipText);
+    }
     favoriteButton.on('click', function(favoriteId, element) {
       return function(event) {
         toggleFavorite(event, favoriteId, element);
@@ -1518,8 +1525,127 @@ function normalizeVariantKey(value) {
 function terminalVariantToken(name) {
   return name.match(/(\[[^\]]+\]|\([^()]+\))\s*$/);
 }
+var goodToolsRegionLabels = {
+  u: 'USA',
+  usa: 'USA',
+  e: 'Europe',
+  europe: 'Europe',
+  j: 'Japan',
+  japan: 'Japan',
+  w: 'World',
+  world: 'World',
+  ue: 'USA, Europe',
+  'usa, europe': 'USA, Europe',
+  'europe, usa': 'USA, Europe',
+  g: 'Germany',
+  germany: 'Germany',
+  f: 'France',
+  france: 'France',
+  s: 'Spain',
+  spain: 'Spain',
+  i: 'Italy',
+  it: 'Italy',
+  italy: 'Italy',
+  a: 'Australia',
+  australia: 'Australia',
+  asia: 'Asia',
+  k: 'Korea',
+  korea: 'Korea',
+  c: 'China',
+  china: 'China',
+  hk: 'Hong Kong',
+  'hong kong': 'Hong Kong',
+  nl: 'Netherlands',
+  netherlands: 'Netherlands',
+  unl: 'Unlicensed',
+  pd: 'Public Domain'
+};
+var goodToolsCodeExplanations = {
+  '!': 'Verified good dump.',
+  a: 'Alternate version.',
+  b: 'Bad dump.',
+  f: 'Fixed or patched dump.',
+  h: 'Hack.',
+  o: 'Overdump.',
+  p: 'Pirate release.',
+  t: 'Trained release.',
+  m: 'Multilanguage release.',
+  pd: 'Public domain release.',
+  unl: 'Unlicensed release.',
+  beta: 'Beta build.',
+  proto: 'Prototype build.',
+  sample: 'Sample build.',
+  demo: 'Demo build.',
+  kiosk: 'Kiosk or demo unit build.',
+  promo: 'Promotional build.',
+  alpha: 'Alpha build.'
+};
+function normalizeGoodToolsRegion(value) {
+  return goodToolsRegionLabels[String(value || '').trim().toLowerCase()] || '';
+}
+function explainGoodToolsCode(value) {
+  var content = String(value || '').trim();
+  if (!content) {
+    return '';
+  }
+  var lower = content.toLowerCase();
+  if (goodToolsCodeExplanations[lower]) {
+    return goodToolsCodeExplanations[lower];
+  }
+  if (/^t[+-]/i.test(content)) {
+    return 'Translation patch (' + content + ').';
+  }
+  if (/^m\d+$/i.test(content)) {
+    return 'Multilanguage release (' + content + ').';
+  }
+  var family = lower.charAt(0);
+  if (goodToolsCodeExplanations[family]) {
+    return goodToolsCodeExplanations[family] + (content.length > 1 ? ' (' + content + ')' : '');
+  }
+  return 'GoodTools code ' + content + '.';
+}
+function classifyGoodToolsToken(rawToken) {
+  var raw = String(rawToken || '');
+  var content = raw.slice(1, -1).trim();
+  var lower = content.toLowerCase();
+  var region = normalizeGoodToolsRegion(content);
+  if (region) {
+    return {type: 'region', value: region, raw: raw, content: content};
+  }
+  if (isVersionLabel(content)) {
+    return {type: 'version', value: content.toUpperCase(), raw: raw, content: content};
+  }
+  if (raw === '[!]') {
+    return {type: 'quality', family: '!', value: content, raw: raw, content: content, label: explainGoodToolsCode(content || '!')};
+  }
+  if (/^(alpha|beta|proto|prototype|sample|demo|kiosk|promo)$/i.test(content)) {
+    return {type: 'release', family: lower.replace('prototype', 'proto'), value: content, raw: raw, content: content, label: explainGoodToolsCode(content)};
+  }
+  if (/^t[+-]/i.test(content)) {
+    return {type: 'flag', family: 'translation', value: content, raw: raw, content: content, label: explainGoodToolsCode(content)};
+  }
+  if (/^m\d+$/i.test(content)) {
+    return {type: 'flag', family: 'multilanguage', value: content, raw: raw, content: content, label: explainGoodToolsCode(content)};
+  }
+  if (/^(a|b|f|h|o|p|t)\d*[a-z]*$/i.test(content) || /^(pd|unl)$/i.test(content)) {
+    return {type: 'flag', family: content.toLowerCase().charAt(0), value: content, raw: raw, content: content, label: explainGoodToolsCode(content)};
+  }
+  return {type: 'flag', family: 'other', value: content, raw: raw, content: content, label: explainGoodToolsCode(content)};
+}
+function variantTooltipText(variant) {
+  var lines = [];
+  (variant.codeTooltips || []).forEach(function(item) {
+    if (item && item.code && item.description) {
+      lines.push(item.code + ': ' + item.description);
+    }
+  });
+  if (variant.clean && !lines.some(function(line) { return line.indexOf('[!]') === 0; })) {
+    lines.push('[!]: Verified good dump.');
+  }
+  return lines.join('\n');
+}
 function isRegionLabel(value) {
-  return /^(u|usa|e|europe|j|japan|g|germany|f|france|s|spain|it|italy|australia|world|ue|usa,\s*europe|europe,\s*usa)$/i.test(String(value || '').trim());
+  return !!normalizeGoodToolsRegion(value);
 }
 function isVersionLabel(value) {
   return /^(v\d+(\.\d+)?|rev(ision)?\s*\d+)$/i.test(String(value || '').trim());
@@ -1527,34 +1653,43 @@ function isVersionLabel(value) {
 function parseVariantInfo(name) {
   var working = String(name || '').trim();
   var tokens = [];
+  var parsedTokens = [];
   while (true) {
     var match = terminalVariantToken(working);
     if (!match) {
       break;
     }
     var token = match[1];
-    tokens.unshift(token);
-    working = working.slice(0, match.index).trim();
+    var parsed = classifyGoodToolsToken(token);
+    if (token.startsWith('[') || parsed.type === 'region' || parsed.type === 'version' || parsed.type === 'release') {
+      tokens.unshift(token);
+      parsedTokens.unshift(parsed);
+      working = working.slice(0, match.index).trim();
+      continue;
+    }
+    break;
   }
   var region = '';
   var version = '';
   var flags = [];
   var clean = false;
-  tokens.forEach(function(raw) {
-    var content = raw.slice(1, -1).trim();
-    if (!region && isRegionLabel(content)) {
-      region = content;
+  var codeTooltips = [];
+  parsedTokens.forEach(function(token) {
+    if (!region && token.type === 'region') {
+      region = token.value;
       return;
     }
-    if (!version && isVersionLabel(content)) {
-      version = content.toUpperCase();
+    if (!version && token.type === 'version') {
+      version = token.value;
       return;
     }
-    if (raw === '[!]') {
+    if (token.family === '!') {
       clean = true;
-      return;
     }
-    flags.push(raw);
+    flags.push(token.raw);
+    if (token.label) {
+      codeTooltips.push({code: token.raw, description: token.label});
+    }
   });
   var title = working || String(name || '').trim();
   var extraLabel = flags.map(function(flag) {
@@ -1569,6 +1704,7 @@ function parseVariantInfo(name) {
     extraLabel: extraLabel,
     flags: flags,
     clean: clean,
+    codeTooltips: codeTooltips,
     searchText: [name, title, region, version, extraLabel].join(' ').toLowerCase()
   };
 }
@@ -1652,6 +1788,7 @@ function groupConsoleItems(consoleConfig, consoleRoot) {
       extraLabel: parsed.extraLabel,
       flags: parsed.flags,
       clean: parsed.clean,
+      codeTooltips: parsed.codeTooltips,
       searchText: parsed.searchText
     };
     if (!allowGrouping || itemType !== 'game') {
@@ -2299,6 +2436,11 @@ async function rendermenu(datas) {
     var item = entry.representative.resolved;
     var name = entry.representative.name;
     var displayName = entry.displayName || name;
+    var variantTooltip = variantTooltipText(entry.representative);
+    var launchTooltip = variantTooltip;
+    if (entry.variantCount > 1) {
+      launchTooltip = (launchTooltip ? launchTooltip + '\n' : '') + 'Multiple versions are grouped here. Open this game to choose a specific version.';
+    }
     // Use text or image tag based on logo
     if (item.hasOwnProperty('has_logo')) {
       var has_logo = item.has_logo;
@@ -2348,7 +2490,7 @@ async function rendermenu(datas) {
     return '\
       <div id="m' + count + '">\
         <div id="h' + count + '" class="menu-wrap ' + shrink + '">\
-          <a onclick="launch(this)" id="i' + count + '" ' + jsdata + '>\
+          <a onclick="launch(this)" id="i' + count + '" title="' + escapeHtml(launchTooltip || displayName) + '" ' + jsdata + '>\
             ' + logo_html + '\
           </a>' + saveButton + romDownloadButton + favoriteButton + '\
         </div>\

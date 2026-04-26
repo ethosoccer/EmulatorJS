@@ -10,7 +10,7 @@
         document.documentElement.setAttribute('data-theme', savedTheme || (prefersDark ? 'dark' : 'light'));
       }());
     </script>
-    <link rel="stylesheet" href="public/css/index.css?v=20260425-art-scan-flags">
+    <link rel="stylesheet" href="public/css/index.css?v=20260426-goodtools-scan-jobs">
   </head>
   <body class="admin-locked">
     <div id="admin-login" class="admin-login">
@@ -34,6 +34,7 @@
         <div onclick="renderProfile()" class="top-item">Profile Management</div>
         <div onclick="renderMeta()" class="top-item">Custom Metadata</div>
         <div onclick="renderLogsView()" class="top-item">Logs</div>
+        <div onclick="renderScansView()" class="top-item">Scans</div>
       </div>
       <div class="theme-actions">
         <button id="theme-toggle" class="button theme-toggle" type="button" aria-label="Toggle dark mode">Dark mode</button>
@@ -212,6 +213,6 @@
     <script src="socket.io/socket.io.js"></script>
     <script src="public/js/vendor/jquery.min.js"></script>
     <script src="public/js/vendor/ace.js"></script>
-    <script src="public/js/index.js?v=20260425-art-scan-flags"></script>
+    <script src="public/js/index.js?v=20260426-goodtools-scan-jobs"></script>
   </body>
 </html>

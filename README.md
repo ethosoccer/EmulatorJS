@@ -54,8 +54,12 @@ This fork is tailored for a self-hosted EmulatorJS deployment with a browser-fac
 - Preferred scan region per system
 - Scan flags for previously reviewed ROMs
 - Scan only new items vs scan all items
+- Shared scan queue with cancel support across ROM scans, art downloads, and default file updates
+- Running scans dashboard in the admin UI to reopen progress or cancel active work
 - Searchable ROM identification workflow
 - Accessible color changes for identified vs missing artwork states
+- GoodTools-aware parsing of ROM names, including region/version/quality flags and smarter auto-linking for multi-region or multi-version sets
+- Variant grouping on the frontend so region/version siblings appear as one game with a chooser modal for exact launches or favorites
 
 ### Security and observability
 - Hardened auth/session behavior for public exposure
@@ -66,6 +70,44 @@ This fork is tailored for a self-hosted EmulatorJS deployment with a browser-fac
 
 ### Deployment notes
 This fork includes a Docker-based deployment overlay in [`docker/linuxserver-overlay`](docker/linuxserver-overlay) for the self-hosted setup used in this project.
+
+### GoodTools naming support
+This fork understands common [GoodTools](https://segaretro.org/GoodTools) naming conventions and uses them throughout ROM scanning, art downloads, and the frontend variant picker. The code meanings are based on GoodTools references from Sega Retro and Game Tech Wiki's [standard code list](https://emulation.gametechwiki.com/index.php/GoodTools#Standard_codes).
+
+Common regions recognized by the scan pipeline and frontend include:
+- `U` / `USA`
+- `E` / `Europe`
+- `J` / `Japan`
+- `W` / `World`
+- `UE` / `USA, Europe`
+- `G` / `Germany`
+- `F` / `France`
+- `S` / `Spain`
+- `I` / `Italy`
+- `A` / `Australia`
+- `Asia`, `Korea`, `China`, `Hong Kong`
+- `PD` / `Public Domain`
+- `Unl` / `Unlicensed`
+
+Common GoodTools codes currently surfaced in the UI and scan logic:
+- `[!]` verified good dump
+- `[a]` alternate version
+- `[b]` bad dump
+- `[f]` fixed or patched dump
+- `[h]` hack
+- `[o]` overdump
+- `[p]` pirate release
+- `[t]` trained release
+- `[T+...]` translation patch
+- `[M#]` multilanguage release
+- `(V1.0)` / `(V1.1)` style version tags
+- `Beta`, `Alpha`, `Proto`, `Sample`, `Demo`, `Promo`, `Kiosk`
+
+The scan pipeline uses that metadata to:
+- prefer the configured scan region when multiple matches exist
+- treat version and region siblings as one frontend game group with multiple launchable variants
+- reuse downloaded art across sibling versions when the base title and region are the same
+- expose code/tool-tip explanations such as `[!]` meaning a verified good dump
 
 ### Supported Systems
 EmulatorJS supports a wide variety of legacy consoles and arcade machines. For the complete list of supported cores, please visit our [Cores Documentation](https://emulatorjs.org/docs4devs/cores).

@@ -24,7 +24,7 @@ if (home == '/data') {
   home = '/config'
 }
 var baseUrl = process.env.SUBFOLDER || '/';
-if (fs.existsSync('/data')) { 
+if (fs.existsSync('/data')) {
   var dataRoot = '/data/';
 } else {
   var dataRoot = __dirname + '/frontend/user/'
@@ -87,6 +87,212 @@ var USERNAME_REGEX = /^[A-Za-z0-9._-]{3,32}$/;
 var settingsFile = home + '/profile/settings.json';
 var geoLookupCache = new Map();
 var GEO_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+var scanJobs = new Map();
+var scanJobKeys = new Map();
+var scanJobSeq = 1;
+var GOODTOOLS_REGION_LABELS = {
+  u: 'USA',
+  usa: 'USA',
+  e: 'Europe',
+  europe: 'Europe',
+  j: 'Japan',
+  japan: 'Japan',
+  w: 'World',
+  world: 'World',
+  ue: 'USA, Europe',
+  'usa, europe': 'USA, Europe',
+  'europe, usa': 'USA, Europe',
+  g: 'Germany',
+  germany: 'Germany',
+  f: 'France',
+  france: 'France',
+  s: 'Spain',
+  spain: 'Spain',
+  i: 'Italy',
+  italy: 'Italy',
+  a: 'Australia',
+  australia: 'Australia',
+  asia: 'Asia',
+  k: 'Korea',
+  korea: 'Korea',
+  c: 'China',
+  china: 'China',
+  hk: 'Hong Kong',
+  'hong kong': 'Hong Kong',
+  nl: 'Netherlands',
+  netherlands: 'Netherlands',
+  unl: 'Unlicensed',
+  pd: 'Public Domain'
+};
+var GOODTOOLS_CODE_EXPLANATIONS = {
+  '!': 'Verified good dump.',
+  a: 'Alternate version.',
+  b: 'Bad dump.',
+  f: 'Fixed or patched dump.',
+  h: 'Hack.',
+  o: 'Overdump.',
+  p: 'Pirate release.',
+  t: 'Trained release.',
+  m: 'Multilanguage release.',
+  pd: 'Public domain release.',
+  unl: 'Unlicensed release.',
+  beta: 'Beta build.',
+  proto: 'Prototype build.',
+  sample: 'Sample build.',
+  demo: 'Demo build.',
+  kiosk: 'Kiosk or demo unit build.',
+  promo: 'Promotional build.',
+  alpha: 'Alpha build.'
+};
+
+function explainGoodToolsCode(content) {
+  let value = String(content || '').trim();
+  if (!value) {
+    return '';
+  }
+  let lower = value.toLowerCase();
+  if (GOODTOOLS_CODE_EXPLANATIONS[lower]) {
+    return GOODTOOLS_CODE_EXPLANATIONS[lower];
+  }
+  if (/^t[+-]/i.test(value)) {
+    return 'Translation patch (' + value + ').';
+  }
+  if (/^m\d+$/i.test(value)) {
+    return 'Multilanguage release (' + value + ').';
+  }
+  let family = lower.charAt(0);
+  if (GOODTOOLS_CODE_EXPLANATIONS[family]) {
+    return GOODTOOLS_CODE_EXPLANATIONS[family] + (value.length > 1 ? ' (' + value + ')' : '');
+  }
+  return 'GoodTools code ' + value + '.';
+}
+
+function scanJobKey(type, dir) {
+  return [type || 'scan', dir || 'global'].join(':');
+}
+
+function serializeScanJob(job) {
+  return {
+    id: job.id,
+    type: job.type,
+    dir: job.dir || '',
+    mode: job.mode || '',
+    label: job.label || '',
+    status: job.status,
+    startedAt: job.startedAt,
+    endedAt: job.endedAt || '',
+    cancelRequested: !!job.cancelRequested,
+    logs: (job.logs || []).slice(-500),
+    error: job.error || '',
+    result: job.result || {}
+  };
+}
+
+function broadcastScanJobs() {
+  if (typeof io === 'undefined') {
+    return;
+  }
+  let jobs = Array.from(scanJobs.values())
+    .sort(function(a, b) {
+      return new Date(b.startedAt || 0).getTime() - new Date(a.startedAt || 0).getTime();
+    })
+    .map(serializeScanJob);
+  io.emit('scanjobs', jobs);
+}
+
+function appendScanJobLog(job, message) {
+  if (!job) {
+    return;
+  }
+  String(message || '')
+    .replace(/\r/g, '')
+    .split('\n')
+    .map(function(line) { return line.trimEnd(); })
+    .filter(function(line) { return line.length > 0; })
+    .forEach(function(line) {
+      job.logs.push('[' + new Date().toISOString() + '] ' + line);
+    });
+  if (job.logs.length > 1200) {
+    job.logs = job.logs.slice(-1200);
+  }
+  broadcastScanJobs();
+}
+
+function finishScanJob(job, status, result, error) {
+  if (!job) {
+    return;
+  }
+  job.status = status;
+  job.endedAt = new Date().toISOString();
+  job.result = result || {};
+  job.error = error ? String(error) : '';
+  job.process = null;
+  if (scanJobKeys.get(job.key) === job.id) {
+    scanJobKeys.delete(job.key);
+  }
+  broadcastScanJobs();
+}
+
+function createScanJob(type, dir, mode, label) {
+  let key = scanJobKey(type, dir);
+  let existingId = scanJobKeys.get(key);
+  if (existingId && scanJobs.has(existingId)) {
+    let existingJob = scanJobs.get(existingId);
+    if (existingJob.status === 'running' || existingJob.status === 'canceling') {
+      return {existing: existingJob};
+    }
+  }
+  let job = {
+    id: 'scan-' + (scanJobSeq++),
+    key: key,
+    type: type,
+    dir: dir || '',
+    mode: mode || '',
+    label: label || type,
+    status: 'running',
+    startedAt: new Date().toISOString(),
+    endedAt: '',
+    cancelRequested: false,
+    logs: [],
+    process: null,
+    result: {},
+    error: ''
+  };
+  scanJobs.set(job.id, job);
+  scanJobKeys.set(key, job.id);
+  broadcastScanJobs();
+  return {job: job};
+}
+
+function requestCancelScanJob(scanId) {
+  let job = scanJobs.get(scanId);
+  if (!job) {
+    return false;
+  }
+  if (job.status !== 'running') {
+    return true;
+  }
+  job.cancelRequested = true;
+  job.status = 'canceling';
+  appendScanJobLog(job, 'Cancel requested.');
+  if (job.process && typeof job.process.kill === 'function') {
+    try {
+      job.process.kill('SIGTERM');
+    } catch (e) {
+      console.log(e);
+    }
+  }
+  broadcastScanJobs();
+  return true;
+}
+
+function currentSerializedScanJobs() {
+  return Array.from(scanJobs.values())
+    .sort(function(a, b) {
+      return new Date(b.startedAt || 0).getTime() - new Date(a.startedAt || 0).getTime();
+    })
+    .map(serializeScanJob);
+}
 
 function rescanFlagPath(dir, file) {
   return hashPath + dir + '/rescan/' + encodeURIComponent(file) + '.rescan';
@@ -125,34 +331,67 @@ function normalizeRomName(value) {
     .toLowerCase();
 }
 
+function normalizeGoodToolsRegion(content) {
+  let value = String(content || '').trim().toLowerCase();
+  return GOODTOOLS_REGION_LABELS[value] || '';
+}
+
+function isGoodToolsRegion(content) {
+  return !!normalizeGoodToolsRegion(content);
+}
+
+function isGoodToolsVersion(content) {
+  return /^v\d+(\.\d+)?$/i.test(String(content || '').trim()) || /^rev(ision)?\s*\d+$/i.test(String(content || '').trim());
+}
+
+function classifyGoodToolsToken(rawToken) {
+  let raw = String(rawToken || '');
+  let content = raw.replace(/^[\[(]|[\])]$/g, '').trim();
+  let lower = content.toLowerCase();
+  let region = normalizeGoodToolsRegion(content);
+  if (region) {
+    return {type: 'region', value: region, raw: raw, content: content};
+  }
+  if (isGoodToolsVersion(content)) {
+    return {type: 'version', value: content.toUpperCase(), raw: raw, content: content};
+  }
+  if (raw === '[!]') {
+    return {type: 'quality', family: '!', value: content, label: explainGoodToolsCode(content), raw: raw, content: content};
+  }
+  if (/^(alpha|beta|proto|prototype|sample|demo|kiosk|promo)$/i.test(content)) {
+    return {type: 'release', family: lower.replace('prototype', 'proto'), value: content, label: explainGoodToolsCode(content), raw: raw, content: content};
+  }
+  if (/^t[+-]/i.test(content)) {
+    return {type: 'flag', family: 'translation', value: content, label: explainGoodToolsCode(content), raw: raw, content: content};
+  }
+  if (/^m\d+$/i.test(content)) {
+    return {type: 'flag', family: 'multilanguage', value: content, label: explainGoodToolsCode(content), raw: raw, content: content};
+  }
+  if (/^(a|b|f|h|o|p|t)\d*[a-z]*$/i.test(content)) {
+    return {type: 'flag', family: lower.charAt(0), value: content, label: explainGoodToolsCode(content), raw: raw, content: content};
+  }
+  if (/^(pd|unl)$/i.test(content)) {
+    return {type: 'flag', family: lower, value: content, label: explainGoodToolsCode(content), raw: raw, content: content};
+  }
+  return {type: 'flag', family: 'other', value: content, label: explainGoodToolsCode(content), raw: raw, content: content};
+}
+
 function canonicalVariantInfo(fileName) {
   let fileExtension = path.extname(fileName || '');
   let baseName = path.basename(fileName || '', fileExtension).trim();
   let working = baseName;
   let tokens = [];
-  function isRegionToken(content) {
-    let value = String(content || '').trim().toLowerCase();
-    return /^(u|usa|e|europe|j|japan|w|world|g|germany|f|france|s|spain|i|italy|australia|asia|unl|pd)$/i.test(value)
-      || /^(usa|europe|japan|world)(,\s*(usa|europe|japan|world))+$/i.test(value);
-  }
-  function isVersionToken(content) {
-    return /^v\d+(\.\d+)?$/i.test(String(content || '').trim()) || /^rev\s*\d+$/i.test(String(content || '').trim());
-  }
-  function shouldStripParen(content) {
-    let value = String(content || '').trim();
-    return isRegionToken(value)
-      || isVersionToken(value)
-      || /^(beta|proto|sample|demo|hack|unl|pd)$/i.test(value);
-  }
+  let parsedTokens = [];
   while (true) {
     let match = working.match(/\s*(\[[^\]]+\]|\([^()]+\))\s*$/);
     if (!match) {
       break;
     }
     let token = match[1];
-    let content = token.slice(1, -1).trim();
-    if (token.startsWith('[') || shouldStripParen(content)) {
-      tokens.unshift({raw: token, content: content});
+    let parsed = classifyGoodToolsToken(token);
+    if (token.startsWith('[') || parsed.type === 'region' || parsed.type === 'version' || parsed.type === 'release') {
+      tokens.unshift({raw: token, content: parsed.content});
+      parsedTokens.unshift(parsed);
       working = working.slice(0, match.index).trim();
       continue;
     }
@@ -162,20 +401,23 @@ function canonicalVariantInfo(fileName) {
   let version = '';
   let flags = [];
   let clean = false;
-  for (let token of tokens) {
-    if (!region && isRegionToken(token.content)) {
-      region = token.content;
+  let codeTooltips = [];
+  for (let token of parsedTokens) {
+    if (!region && token.type === 'region') {
+      region = token.value;
       continue;
     }
-    if (!version && isVersionToken(token.content)) {
-      version = token.content.toUpperCase();
+    if (!version && token.type === 'version') {
+      version = token.value;
       continue;
     }
-    if (token.raw === '[!]') {
+    if (token.family === '!') {
       clean = true;
-      continue;
     }
     flags.push(token.raw);
+    if (token.label) {
+      codeTooltips.push({code: token.raw, description: token.label});
+    }
   }
   let title = working || baseName;
   let canonicalKey = normalizeRomName(title);
@@ -189,7 +431,8 @@ function canonicalVariantInfo(fileName) {
     region: region,
     version: version,
     flags: flags,
-    clean: clean
+    clean: clean,
+    codeTooltips: codeTooltips
   };
 }
 
@@ -233,7 +476,15 @@ async function autoIdentifyPreferredRegion(dir, preferredRegion) {
     userMeta = JSON.parse(await fsw.readFile(userMetaFile, 'utf8'));
   }
   metaData = merge(metaData, userMeta);
-  let region = String(preferredRegion).toLowerCase();
+  let region = normalizeGoodToolsRegion(preferredRegion) || String(preferredRegion).trim();
+  let candidates = Object.keys(metaData).map(function(metaSha) {
+    let record = metaData[metaSha];
+    if (!record || !record.name) {
+      return null;
+    }
+    let parsed = canonicalVariantInfo(record.name);
+    return {sha: metaSha, record: record, parsed: parsed};
+  }).filter(Boolean);
   let files = await fsw.readdir(shaPath);
   let linked = 0;
   for await (let file of files) {
@@ -242,22 +493,31 @@ async function autoIdentifyPreferredRegion(dir, preferredRegion) {
     if (metaData.hasOwnProperty(sha)) {
       continue;
     }
-    let targetName = normalizeRomName(romFile);
-    let romRegion = (romFile.match(/\(([^)]*)\)/) || [])[1];
-    let effectiveRegion = String(romRegion || region).toLowerCase();
-    if (!effectiveRegion) {
-      continue;
-    }
-    let matches = Object.keys(metaData).filter(function(metaSha) {
-      let record = metaData[metaSha];
-      if (!record || !record.name) {
-        return false;
-      }
-      let name = String(record.name);
-      return normalizeRomName(name) === targetName && name.toLowerCase().indexOf('(' + effectiveRegion + ')') !== -1;
-    });
-    if (matches.length === 1) {
-      userMeta[sha] = {ref: matches[0]};
+    let parsedRom = canonicalVariantInfo(romFile);
+    let effectiveRegion = parsedRom.region || region;
+    let matches = candidates
+      .map(function(candidate) {
+        if (candidate.parsed.canonicalKey !== parsedRom.canonicalKey) {
+          return null;
+        }
+        let score = 1000;
+        if (effectiveRegion && candidate.parsed.region === effectiveRegion) {
+          score += 200;
+        } else if (!parsedRom.region && region && candidate.parsed.region === region) {
+          score += 150;
+        }
+        if (parsedRom.version && candidate.parsed.version === parsedRom.version) {
+          score += 50;
+        }
+        if (parsedRom.clean && candidate.parsed.clean) {
+          score += 10;
+        }
+        return {sha: candidate.sha, score: score};
+      })
+      .filter(Boolean)
+      .sort(function(a, b) { return b.score - a.score; });
+    if (matches.length === 1 || (matches[0] && (!matches[1] || matches[0].score > matches[1].score))) {
+      userMeta[sha] = {ref: matches[0].sha};
       linked++;
     }
   }
@@ -1057,6 +1317,58 @@ io.on('connection', async function (socket) {
     socket.emit('renderlanding');
   };
 
+  function renderScansView() {
+    socket.emit('renderscans', currentSerializedScanJobs());
+  }
+
+  function emitScanJobsToSocket() {
+    socket.emit('scanjobs', currentSerializedScanJobs());
+  }
+
+  function emitScanJobStarted(status, job, message) {
+    socket.emit('scanjobstarted', {
+      status: status,
+      message: message || '',
+      job: job ? serializeScanJob(job) : null
+    });
+  }
+
+  async function executeScanJob(type, dir, mode, label, executor) {
+    let created = createScanJob(type, dir, mode, label);
+    if (created.existing) {
+      emitScanJobStarted('exists', created.existing, 'A matching scan is already running.');
+      return created.existing;
+    }
+    let job = created.job;
+    appendScanJobLog(job, label + ' started.');
+    emitScanJobStarted('started', job, label + ' started.');
+    try {
+      let result = await executor(job);
+      if (job.cancelRequested) {
+        finishScanJob(job, 'canceled', result || {}, '');
+      } else {
+        finishScanJob(job, 'completed', result || {}, '');
+      }
+    } catch (e) {
+      console.log(e);
+      if (job.cancelRequested || (e && e.code === 'SCAN_CANCELED')) {
+        finishScanJob(job, 'canceled', job.result || {}, '');
+      } else {
+        finishScanJob(job, 'failed', job.result || {}, e && e.message ? e.message : String(e));
+        appendScanJobLog(job, 'ERROR: ' + (e && e.message ? e.message : e));
+      }
+    }
+    return job;
+  }
+
+  function ensureScanNotCanceled(job) {
+    if (job && job.cancelRequested) {
+      let err = new Error('Scan canceled.');
+      err.code = 'SCAN_CANCELED';
+      throw err;
+    }
+  }
+
   async function renderLogs(filters) {
     let settings = await readSettings();
     let logs = runLogDb('query', {filters: filters || {}});
@@ -1150,6 +1462,23 @@ io.on('connection', async function (socket) {
     });
   }
 
+  async function startScanJobRequest(data) {
+    data = data || {};
+    let type = String(data.type || '').trim();
+    let dir = String(data.dir || '').trim();
+    let mode = String(data.mode || '').trim();
+    if (type === 'rom-scan') {
+      return await scanRoms([dir, mode === 'all', data.preferredRegion || '']);
+    }
+    if (type === 'art-download') {
+      return await downloadArt([dir, mode === 'all']);
+    }
+    if (type === 'default-files') {
+      return await dlDefaultFiles();
+    }
+    emitScanJobStarted('error', null, 'Unknown scan type.');
+  }
+
   // Send file contents to client
   async function getConfig(file) {
     file = file + '.json';
@@ -1214,11 +1543,21 @@ io.on('connection', async function (socket) {
       timeout: ipfsDownloadTimeout,
       attempts: ipfsDownloadAttempts
     }, options || {});
+    let scanJob = options.job || null;
+    let notify = options.notify || function(message) {
+      if (scanJob) {
+        appendScanJobLog(scanJob, message);
+      } else {
+        socket.emit('modaldata', message);
+      }
+    };
+    ensureScanNotCanceled(scanJob);
     await fsw.mkdir(path.dirname(file), { recursive: true });
     let writeStream = fs.createWriteStream(file);
-    socket.emit('modaldata', 'Downloading: ' + file);
+    notify('Downloading: ' + file);
     try {
       for await (var fileStream of ipfs.cat(cid, {'timeout': options.timeout})) {
+        ensureScanNotCanceled(scanJob);
         writeStream.write(fileStream);
       };
       writeStream.end();
@@ -1230,6 +1569,14 @@ io.on('connection', async function (socket) {
       };
     } catch (e) {
       writeStream.end();
+      if (scanJob && scanJob.cancelRequested) {
+        if (fs.existsSync(file)) {
+          fs.unlinkSync(file);
+        }
+        let cancelError = new Error('Scan canceled.');
+        cancelError.code = 'SCAN_CANCELED';
+        throw cancelError;
+      }
       if (count < options.attempts) {
         if (reconnectDefaultPeer) {
           try {
@@ -1240,7 +1587,7 @@ io.on('connection', async function (socket) {
         };
         return await ipfsDownload(cid, file, count, options);
       } else {
-        socket.emit('modaldata', 'ERROR Downloading: ' + file);
+        notify('ERROR Downloading: ' + file);
         if (fs.existsSync(file)) {
           fs.unlinkSync(file);
         }
@@ -1257,30 +1604,35 @@ io.on('connection', async function (socket) {
 
   // Download default files for user directory
   async function dlDefaultFiles() {
-    var metaData = await fsw.readFile('./metadata/default_files.json', 'utf8');
-    var metaData = JSON.parse(metaData);
-    socket.emit('emptymodal');
-    for await (var item of metaData) {
-      var file = item.file.replace('/data/', dataRoot);
-      var cid = item.cid;
-      if (cid == 'directory') {
-        await fsw.mkdir(file, { recursive: true });
-      } else {
-        await ipfsDownload(cid, file, 0);
-      }
-    };
-    for await (var dir of emus) {
-      var path = dataRoot + 'hashes/' + dir.name + '/roms/';
-      if (fs.existsSync(path)) {
-        var roms = await fsw.readdir(path);
-        if (roms.length > 0) {
-          socket.emit('modaldata', 'Processing Config for ' + dir.name);
-          await addToConfig(dir.name, true);
+    return await executeScanJob('default-files', 'default', 'update', 'Default files update', async function(job) {
+      var metaData = await fsw.readFile('./metadata/default_files.json', 'utf8');
+      metaData = JSON.parse(metaData);
+      for await (var item of metaData) {
+        ensureScanNotCanceled(job);
+        var file = item.file.replace('/data/', dataRoot);
+        var cid = item.cid;
+        if (cid == 'directory') {
+          await fsw.mkdir(file, { recursive: true });
+          appendScanJobLog(job, 'Ensured directory: ' + file);
+        } else {
+          await ipfsDownload(cid, file, 0, {job: job});
+        }
+      };
+      for await (var dir of emus) {
+        ensureScanNotCanceled(job);
+        var romPath = dataRoot + 'hashes/' + dir.name + '/roms/';
+        if (fs.existsSync(romPath)) {
+          var roms = await fsw.readdir(romPath);
+          if (roms.length > 0) {
+            appendScanJobLog(job, 'Processing config for ' + dir.name);
+            await addToConfig(dir.name, true);
+          };
         };
       };
-    };
-    socket.emit('modaldata', 'Downloaded All Files');
-    renderRoms();
+      appendScanJobLog(job, 'Downloaded all default files.');
+      await renderRoms();
+      return {downloaded: metaData.length};
+    });
   };
 
   // Scan roms directory using helper script
@@ -1288,43 +1640,60 @@ io.on('connection', async function (socket) {
     let folder = data[0];
     let fullScan = data[1];
     let preferredRegion = data[2] || '';
-    socket.emit('emptymodal');
-    let pendingRescans = await applyPendingRescans(folder);
-    if (pendingRescans > 0) {
-      socket.emit('modaldata', 'Queued rescan for ' + pendingRescans + ' item(s).');
-    }
-    let scanProcess = spawn('./has_files.sh', ['/' + folder + '/roms/', folder, fullScan]);
-    scanProcess.stdout.setEncoding('utf8');
-    scanProcess.stderr.setEncoding('utf8');
-    scanProcess.stdout.on('data', function(data) {
-      socket.emit('modaldata', data);
-    });
-    scanProcess.stderr.on('data', function(data) {
-      socket.emit('modaldata', data);
-    });
-    scanProcess.on('close', async function(code) {
-      socket.emit('modaldata', 'Scan exited with code: ' + code);
-      if (preferredRegion) {
+    let mode = fullScan ? 'all' : 'new';
+    return await executeScanJob('rom-scan', folder, mode, 'ROM scan for ' + folder, async function(job) {
+      let pendingRescans = await applyPendingRescans(folder);
+      if (pendingRescans > 0) {
+        appendScanJobLog(job, 'Queued rescan for ' + pendingRescans + ' item(s).');
+      }
+      let scanProcess = spawn('./has_files.sh', ['/' + folder + '/roms/', folder, fullScan]);
+      job.process = scanProcess;
+      scanProcess.stdout.setEncoding('utf8');
+      scanProcess.stderr.setEncoding('utf8');
+      scanProcess.stdout.on('data', function(data) {
+        appendScanJobLog(job, data);
+      });
+      scanProcess.stderr.on('data', function(data) {
+        appendScanJobLog(job, data);
+      });
+      let code = await new Promise(function(resolve, reject) {
+        scanProcess.on('error', reject);
+        scanProcess.on('close', function(exitCode) {
+          resolve(exitCode);
+        });
+      });
+      job.process = null;
+      appendScanJobLog(job, 'Scan exited with code: ' + code);
+      if (!job.cancelRequested && preferredRegion) {
         try {
           let linked = await autoIdentifyPreferredRegion(folder, preferredRegion);
-          socket.emit('modaldata', 'Preferred region auto-linked ' + linked + ' item(s).');
+          appendScanJobLog(job, 'Preferred region auto-linked ' + linked + ' item(s).');
         } catch(e) {
           console.log(e);
-          socket.emit('modaldata', 'Preferred region auto-link failed.');
+          appendScanJobLog(job, 'Preferred region auto-link failed.');
         }
       }
       if (fullScan) {
-        renderRoms();
+        await renderRoms();
       } else {
-        getRoms(folder);
+        await getRoms(folder);
       }
+      if (job.cancelRequested) {
+        let cancelError = new Error('Scan canceled.');
+        cancelError.code = 'SCAN_CANCELED';
+        throw cancelError;
+      }
+      if (code !== 0) {
+        throw new Error('Scan exited with code ' + code + '.');
+      }
+      return {exitCode: code, preferredRegion: preferredRegion || ''};
     });
   };
 
   // Add roms to config file
   async function addToConfig(dir, render) {
     // For arcade roms we need clone info
-    if (dir == 'arcade') { 
+    if (dir == 'arcade') {
       var metaData = await getMeta(dir);
     };
     // Update config file with current rom files
@@ -1439,74 +1808,83 @@ io.on('connection', async function (socket) {
   async function downloadArt(data) {
     let dir = Array.isArray(data) ? data[0] : data;
     let fullScan = Array.isArray(data) ? !!data[1] : true;
-    var metaData = await getMeta(dir);
-    var shaPath = hashPath + dir + '/roms/';
-    var files = await fsw.readdir(shaPath);
-    var artCache = {};
-    var mode = fullScan ? 'all items' : 'new items only';
-    var downloadedCount = 0;
-    var skippedCount = 0;
-    var failedCount = 0;
-    socket.emit('emptymodal');
-    socket.emit('modaldata', 'Downloading art for ' + dir + ' (' + mode + ')');
-    for await (var file of files) {
-      var fileName = file.replace('.sha1','');
-      var fileExtension = path.extname(fileName);
-      var name = path.basename(fileName, fileExtension);
-      var sha = await fsw.readFile(shaPath + file, 'utf8');
-      var variantInfo = canonicalVariantInfo(fileName);
-      if (metaData.hasOwnProperty(sha)) {
-        if (metaData[sha].hasOwnProperty('ref')) {
-          var sha = metaData[sha].ref;
-        };
-        for await (var variable of metaVariables) {
-          if (metaData[sha].hasOwnProperty(variable[0])) {
-            let targetFile = dataRoot + dir + '/' + variable[1] + '/' + name + variable[2];
-            let cacheKey = variantInfo.artGroupKey + '|' + variable[0] + '|' + metaData[sha][variable[0]];
-            if (!fullScan && fs.existsSync(targetFile)) {
-              skippedCount++;
-              continue;
-            }
-            if (!fullScan && artFailed(dir, fileName, variable[0])) {
-              skippedCount++;
-              socket.emit('modaldata', 'Skipping failed ' + variable[0] + ': ' + fileName);
-              continue;
-            }
-            if (artCache[cacheKey] && artCache[cacheKey].status === 'success' && fs.existsSync(artCache[cacheKey].file)) {
-              await fsw.mkdir(path.dirname(targetFile), {recursive: true});
-              await fsw.copyFile(artCache[cacheKey].file, targetFile);
-              await clearArtFailed(dir, fileName, variable[0]);
-              downloadedCount++;
-              socket.emit('modaldata', 'Copied cached ' + variable[0] + ': ' + fileName);
-              continue;
-            }
-            if (!fullScan && artCache[cacheKey] && artCache[cacheKey].status === 'failed') {
-              skippedCount++;
-              await markArtFailed(dir, fileName, variable[0]);
-              continue;
-            }
-            let success = await ipfsDownload(metaData[sha][variable[0]], targetFile, 0, {
-              timeout: Math.min(ipfsDownloadTimeout, 2500),
-              attempts: 3
-            });
-            if (success) {
-              artCache[cacheKey] = {status: 'success', file: targetFile};
-              await clearArtFailed(dir, fileName, variable[0]);
-              downloadedCount++;
-            } else {
-              artCache[cacheKey] = {status: 'failed'};
-              await markArtFailed(dir, fileName, variable[0]);
-              failedCount++;
-            }
+    let mode = fullScan ? 'all' : 'new';
+    return await executeScanJob('art-download', dir, mode, 'Art download for ' + dir, async function(job) {
+      var metaData = await getMeta(dir);
+      var shaPath = hashPath + dir + '/roms/';
+      var files = await fsw.readdir(shaPath);
+      var artCache = {};
+      var downloadedCount = 0;
+      var skippedCount = 0;
+      var failedCount = 0;
+      appendScanJobLog(job, 'Downloading art for ' + dir + ' (' + (fullScan ? 'all items' : 'new items only') + ')');
+      for await (var file of files) {
+        ensureScanNotCanceled(job);
+        var fileName = file.replace('.sha1','');
+        var fileExtension = path.extname(fileName);
+        var name = path.basename(fileName, fileExtension);
+        var sha = await fsw.readFile(shaPath + file, 'utf8');
+        var variantInfo = canonicalVariantInfo(fileName);
+        if (metaData.hasOwnProperty(sha)) {
+          if (metaData[sha].hasOwnProperty('ref')) {
+            sha = metaData[sha].ref;
+          };
+          for await (var variable of metaVariables) {
+            ensureScanNotCanceled(job);
+            if (metaData[sha].hasOwnProperty(variable[0])) {
+              let targetFile = dataRoot + dir + '/' + variable[1] + '/' + name + variable[2];
+              let cacheKey = variantInfo.artGroupKey + '|' + variable[0] + '|' + metaData[sha][variable[0]];
+              if (!fullScan && fs.existsSync(targetFile)) {
+                skippedCount++;
+                continue;
+              }
+              if (!fullScan && artFailed(dir, fileName, variable[0])) {
+                skippedCount++;
+                appendScanJobLog(job, 'Skipping failed ' + variable[0] + ': ' + fileName);
+                continue;
+              }
+              if (artCache[cacheKey] && artCache[cacheKey].status === 'success' && fs.existsSync(artCache[cacheKey].file)) {
+                await fsw.mkdir(path.dirname(targetFile), {recursive: true});
+                await fsw.copyFile(artCache[cacheKey].file, targetFile);
+                await clearArtFailed(dir, fileName, variable[0]);
+                downloadedCount++;
+                appendScanJobLog(job, 'Copied cached ' + variable[0] + ': ' + fileName);
+                continue;
+              }
+              if (!fullScan && artCache[cacheKey] && artCache[cacheKey].status === 'failed') {
+                skippedCount++;
+                await markArtFailed(dir, fileName, variable[0]);
+                continue;
+              }
+              let success = await ipfsDownload(metaData[sha][variable[0]], targetFile, 0, {
+                timeout: Math.min(ipfsDownloadTimeout, 2500),
+                attempts: 3,
+                job: job
+              });
+              if (success) {
+                artCache[cacheKey] = {status: 'success', file: targetFile};
+                await clearArtFailed(dir, fileName, variable[0]);
+                downloadedCount++;
+              } else {
+                artCache[cacheKey] = {status: 'failed'};
+                await markArtFailed(dir, fileName, variable[0]);
+                failedCount++;
+              }
+            };
+          };
+          if (metaData[sha].hasOwnProperty('video_position')) {
+            await fsw.writeFile(dataRoot + dir + '/videos/' + name + '.position', metaData[sha].video_position);
           };
         };
-        if (metaData[sha].hasOwnProperty('video_position')) {
-          await fsw.writeFile(dataRoot + dir + '/videos/' + name + '.position', metaData[sha].video_position); 
-        };
       };
-    };
-    socket.emit('modaldata', 'Art download complete. Downloaded/Copied: ' + downloadedCount + ', Skipped: ' + skippedCount + ', Failed: ' + failedCount);
-    getRoms(dir);
+      appendScanJobLog(job, 'Art download complete. Downloaded/Copied: ' + downloadedCount + ', Skipped: ' + skippedCount + ', Failed: ' + failedCount);
+      await getRoms(dir);
+      return {
+        downloadedCount: downloadedCount,
+        skippedCount: skippedCount,
+        failedCount: failedCount
+      };
+    });
   };
 
   // Set user linked metadata
@@ -1553,7 +1931,7 @@ io.on('connection', async function (socket) {
     for await (let variable of metaVariables) {
       let artFile = dataRoot + dir + '/' + variable[1] + '/' + name + variable[2];
       if (fs.existsSync(artFile)) {
-        fs.unlinkSync(artFile); 
+        fs.unlinkSync(artFile);
       }
     };
     let vidPosFile = dataRoot + dir + '/videos/' + name + '.position';
@@ -1598,7 +1976,7 @@ io.on('connection', async function (socket) {
     };
     return metaData;
   }
-  
+
   // Render files page
   async function renderFiles() {
     var dirItems = await fsw.readdir(dataRoot);
@@ -1616,7 +1994,7 @@ io.on('connection', async function (socket) {
     let profilesData = await fsw.readFile(home + '/profile/profile.json', 'utf8');
     let profilesJson = JSON.parse(profilesData);
     let profiles = [];
-    if (Object.keys(profilesJson).length > 0) { 
+    if (Object.keys(profilesJson).length > 0) {
       for await (let profile of Object.keys(profilesJson)) {
         profiles.push(profilesJson[profile].username)
       }
@@ -1689,6 +2067,7 @@ io.on('connection', async function (socket) {
     let file = data[1];
     let fileExtension = path.extname(file);
     let name = path.basename(file, fileExtension);
+    let variantInfo = canonicalVariantInfo(file);
     // Create the preview json
     let rawConfig = await fsw.readFile(dataRoot + 'config/' + dir + '.json', 'utf8');
     let config = JSON.parse(rawConfig);
@@ -1699,6 +2078,7 @@ io.on('connection', async function (socket) {
     // Assemble metdata for client
     let romData = {};
     romData.file = file;
+    romData.variantInfo = variantInfo;
     let shaFile = hashPath + dir + '/roms/' + file + '.sha1';
     romData.scanFlag = fs.existsSync(shaFile);
     let hash = '';
@@ -1834,6 +2214,7 @@ io.on('connection', async function (socket) {
   // Incoming socket requests
   if (socket.adminAuthenticated && existingSession) {
     socket.emit('adminauth', {status: 'success', user: existingSession.user, role: existingSession.role});
+    emitScanJobsToSocket();
     await renderInitialAdminPage();
   }
   socket.on('adminauth', async function(data) {
@@ -1849,6 +2230,7 @@ io.on('connection', async function (socket) {
       }
       socket.adminAuthenticated = true;
       socket.emit('adminauth', {status: 'success', user: profile.username, role: profile.role});
+      emitScanJobsToSocket();
       await renderInitialAdminPage();
     } catch(e) {
       console.log(e);
@@ -1871,6 +2253,8 @@ io.on('connection', async function (socket) {
   socket.on('renderfiles', requireAdmin(renderFiles));
   socket.on('renderprofiles', requireAdmin(renderProfiles));
   socket.on('renderlogs', requireAdmin(renderLogs));
+  socket.on('renderscans', requireAdmin(renderScansView));
+  socket.on('startscanjob', requireAdmin(startScanJobRequest));
   socket.on('savelogsettings', requireAdmin(saveLogSettings));
   socket.on('testlogsinflux', requireAdmin(testLogInflux));
   socket.on('createprofile', requireAdmin(createProfile));
@@ -1882,6 +2266,10 @@ io.on('connection', async function (socket) {
   socket.on('clearromscan', requireAdmin(clearRomScan));
   socket.on('custommeta', requireAdmin(customMeta));
   socket.on('rendermeta', requireAdmin(renderMeta));
+  socket.on('cancelscanjob', requireAdmin(function(scanId) {
+    requestCancelScanJob(scanId);
+    emitScanJobsToSocket();
+  }));
 });
 
 // Cloudcmd File browser data

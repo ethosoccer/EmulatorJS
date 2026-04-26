@@ -68,11 +68,22 @@ function escapeHtml(value) {
   });
 }
 function safeDecodeDisplayName(value) {
+  var text = String(value || '');
   try {
-    return decodeURIComponent(String(value || ''));
+    text = decodeURIComponent(text);
   } catch(e) {
-    return String(value || '');
   }
+  return repairDisplayText(text);
+}
+function repairDisplayText(value) {
+  var text = String(value || '');
+  text = text.replace(/\u00c2\u00b7/g, ' | ');
+  try {
+    if (/[ÃÂ]/.test(text)) {
+      text = decodeURIComponent(escape(text));
+    }
+  } catch(e) {}
+  return text.replace(/\u00b7/g, ' | ');
 }
 function hasUsableValue(value) {
   return typeof value !== 'undefined' && value !== null && String(value).trim() !== '' && String(value) !== 'undefined';
@@ -772,18 +783,57 @@ function closeVariantPanel() {
   variantPanelState = null;
   $('#variant-panel').addClass('hidden');
 }
+function closeInfoPanel() {
+  $('#info-panel').addClass('hidden');
+}
 function variantSummary(variant) {
   var bits = [];
   if (variant.regionLabel) {
-    bits.push(variant.regionLabel);
+    bits.push(repairDisplayText(variant.regionLabel));
   }
   if (variant.versionLabel) {
-    bits.push(variant.versionLabel);
+    bits.push(repairDisplayText(variant.versionLabel));
   }
   if (variant.extraLabel) {
-    bits.push(variant.extraLabel);
+    bits.push(repairDisplayText(variant.extraLabel));
   }
   return bits.join(' | ') || 'Default release';
+}
+function openVariantInfo(event, variant, groupTitle) {
+  if (event) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+  var title = safeDecodeDisplayName((groupTitle || variant.name || 'Game') + ' Info');
+  var tooltipText = variantTooltipText(variant);
+  $('#info-panel-title').text(title);
+  $('#info-panel-results').empty();
+  if (!tooltipText) {
+    $('#info-panel-status').text('No additional GoodTools notes were found for this version.');
+  } else {
+    $('#info-panel-status').text('GoodTools metadata for this version:');
+    tooltipText.split('\n').forEach(function(line) {
+      $('#info-panel-results').append($('<p>').addClass('info-panel-copy').text(repairDisplayText(line)));
+    });
+  }
+  $('#info-panel').removeClass('hidden');
+}
+function downloadVariantRom(event, button) {
+  downloadRom(event, button);
+  closeVariantPanel();
+}
+function handleRomDownload(event, button) {
+  event.preventDefault();
+  event.stopPropagation();
+  var variantCount = Number(button.getAttribute('data-variant-count') || '1');
+  var menuIndex = Number(button.getAttribute('data-menu-index'));
+  var entries = $('#menu').data('menuEntries') || [];
+  var entry = !isNaN(menuIndex) ? entries[menuIndex] : null;
+  if (variantCount > 1 && entry && entry.variants) {
+    openVariantPanel(entry, {mode: 'download'});
+    return;
+  }
+  downloadRom(event, button);
 }
 function renderVariantPanel() {
   if (!variantPanelState || !variantPanelState.variants || variantPanelState.variants.length <= 1) {
@@ -791,10 +841,13 @@ function renderVariantPanel() {
     return;
   }
   var favoriteMode = variantPanelState.mode === 'favorite';
+  var downloadMode = variantPanelState.mode === 'download';
   $('#variant-panel-title').text(safeDecodeDisplayName(variantPanelState.title || (favoriteMode ? 'Choose a Favorite' : 'Choose a Version')));
   $('#variant-panel-status').text(favoriteMode
     ? 'Pick a version to favorite, or click the title to launch it.'
-    : variantPanelState.variants.length + ' version' + (variantPanelState.variants.length === 1 ? '' : 's') + ' available');
+    : (downloadMode
+      ? 'Pick a version to download, or click the title to launch it.'
+      : variantPanelState.variants.length + ' version' + (variantPanelState.variants.length === 1 ? '' : 's') + ' available'));
   $('#variant-panel-results').empty();
   for (var variant of variantPanelState.variants) {
     var row = $('<div>').addClass('variant-result-row');
@@ -820,8 +873,36 @@ function renderVariantPanel() {
     }
     button.append($('<span>').addClass('variant-launch-title').text(safeDecodeDisplayName(variant.name)));
     button.append($('<span>').addClass('variant-launch-meta').text(variantSummary(variant)));
+    var actions = $('<div>').addClass('variant-actions');
+    var infoButton = $('<button>')
+      .addClass('panel-icon-button info-button')
+      .attr('type', 'button')
+      .attr('title', tooltipText ? 'View version info' : 'No extra info')
+      .attr('aria-label', tooltipText ? 'View version info' : 'No extra info')
+      .html('&#9432;');
+    infoButton.on('click', function(item) {
+      return function(event) {
+        openVariantInfo(event, item, variantPanelState.title || item.name);
+      };
+    }(variant));
+    actions.append(infoButton);
+    var downloadButton = $('<button>')
+      .addClass('panel-icon-button')
+      .attr('type', 'button')
+      .attr('title', 'Download this version')
+      .attr('aria-label', 'Download this version')
+      .html('&#10515;');
+    downloadButton.attr('data-rom-path', variant.resolved.path || '');
+    downloadButton.attr('data-rom-name', variant.name);
+    downloadButton.attr('data-rom-extension', String(variant.resolved.rom_extension || ''));
+    downloadButton.on('click', function(element) {
+      return function(event) {
+        downloadVariantRom(event, element);
+      };
+    }(downloadButton.get(0)));
+    actions.append(downloadButton);
     var favoriteButton = $('<button>')
-      .addClass('variant-favorite')
+      .addClass('panel-icon-button variant-favorite')
       .attr('type', 'button')
       .attr('title', isFavorite(variant.id) ? 'Remove from favorites' : 'Add to favorites')
       .attr('aria-label', isFavorite(variant.id) ? 'Remove from favorites' : 'Add to favorites')
@@ -835,15 +916,13 @@ function renderVariantPanel() {
       .attr('data-favorite-variant-choice', favoriteMode ? 'true' : 'false')
       .toggleClass('is-favorite', isFavorite(variant.id))
       .html('&hearts;');
-    if (tooltipText) {
-      favoriteButton.attr('title', (favoriteButton.attr('title') || '') + '\n' + tooltipText);
-    }
     favoriteButton.on('click', function(favoriteId, element) {
       return function(event) {
         toggleFavorite(event, favoriteId, element);
       };
     }(variant.id, favoriteButton.get(0)));
-    row.append(button, favoriteButton);
+    actions.append(favoriteButton);
+    row.append(button, actions);
     $('#variant-panel-results').append(row);
   }
   $('#variant-panel').removeClass('hidden');
@@ -856,6 +935,7 @@ function openVariantPanel(entry, options) {
   closeFavoritesPanel();
   closeLoginPanel();
   closeSavePanel();
+  closeInfoPanel();
   variantPanelState = {
     title: entry.displayName || entry.name,
     groupKey: entry.groupKey || '',
@@ -875,6 +955,7 @@ async function openGameSaves(event, gameName, gameBase) {
   closeFavoritesPanel();
   closeLoginPanel();
   closeVariantPanel();
+  closeInfoPanel();
   $('#save-panel-title').text('Saves for ' + safeDecodeDisplayName(gameName));
   $('#save-panel-status').text('Loading saves...');
   $('#save-panel-results').empty();
@@ -1355,9 +1436,7 @@ function refreshFavoriteButtons() {
     $(this).attr('title', active ? 'Remove from favorites' : 'Add to favorites');
     $(this).attr('aria-label', active ? 'Remove from favorites' : 'Add to favorites');
   });
-  $('.favorite-indicator').each(function() {
-    $(this).toggleClass('is-favorite', true);
-  });
+  $('.favorite-indicator').toggleClass('is-favorite', true);
 }
 function setSaveButtonState(saveBase, hasSaves) {
   $('.save-toggle').filter(function() {
@@ -1429,10 +1508,24 @@ function downloadRom(event, button) {
   a.click();
   a.remove();
 }
+function openMenuInfo(event, button) {
+  if (event) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+  var menuIndex = Number(button.getAttribute('data-menu-index'));
+  var entries = $('#menu').data('menuEntries') || [];
+  var entry = !isNaN(menuIndex) ? entries[menuIndex] : null;
+  if (!entry || !entry.representative) {
+    return;
+  }
+  openVariantInfo(event, entry.representative, entry.displayName || entry.name);
+}
 function openSearchPanel() {
   closeFavoritesPanel();
   closeSavePanel();
   closeVariantPanel();
+  closeInfoPanel();
   $('#search-panel').removeClass('hidden');
   ensureSearchCatalog().then(function() {
     runGameSearch();
@@ -1461,6 +1554,7 @@ function showFavorites() {
   closeSearchPanel();
   closeSavePanel();
   closeVariantPanel();
+  closeInfoPanel();
   $('#favorites-panel').removeClass('hidden');
   $('#favorites-status').text('Loading favorites...');
   $('#favorites-results').empty();
@@ -1493,13 +1587,23 @@ function renderFavoritesPanel() {
     var openButton = $('<button>').addClass('search-result').attr('type', 'button').attr('onclick', 'openFavoriteResult("' + item.id + '")');
     openButton.append($('<span>').addClass('search-result-title').html('&hearts; ' + escapeHtml(cleanGameName(item.name, item.id))));
     openButton.append($('<span>').addClass('search-result-meta').text(item.title || item.root || 'Games'));
-    var removeButton = $('<button>').addClass('favorite-remove favorite-indicator is-favorite').attr('type', 'button').attr('title', 'Remove from favorites').attr('aria-label', 'Remove from favorites').html('&hearts;');
+    var actions = $('<div>').addClass('favorite-actions');
+    var infoText = variantTooltipText(item);
+    var infoButton = $('<button>').addClass('panel-icon-button info-button').attr('type', 'button').attr('title', infoText ? 'View version info' : 'No extra info').attr('aria-label', infoText ? 'View version info' : 'No extra info').html('&#9432;');
+    infoButton.on('click', function(favoriteItem) {
+      return function(event) {
+        openVariantInfo(event, favoriteItem, cleanGameName(favoriteItem.name, favoriteItem.id));
+      };
+    }(item));
+    actions.append(infoButton);
+    var removeButton = $('<button>').addClass('panel-icon-button favorite-remove favorite-indicator is-favorite').attr('type', 'button').attr('title', 'Remove from favorites').attr('aria-label', 'Remove from favorites').html('&hearts;');
     removeButton.on('click', function(favoriteId) {
       return function(event) {
         toggleFavorite(event, favoriteId);
       };
     }(item.id));
-    row.append(openButton, removeButton);
+    actions.append(removeButton);
+    row.append(openButton, actions);
     $('#favorites-results').append(row);
   }
 }
@@ -2479,22 +2583,24 @@ async function rendermenu(datas) {
     var favoriteName = cleanGameName(displayName, itemPath + '::' + displayName);
     var favoriteId = entry.id || (itemPath + '::' + romName);
     var saveBase = saveBasename(romName + (item.hasOwnProperty('rom_extension') ? item.rom_extension : data.defaults.rom_extension || ''));
-    var favoriteButton = '';
-    var saveButton = '';
-    var romDownloadButton = '';
-    if (itemType == 'game') {
-      saveButton = '<button class="save-toggle hidden" type="button" data-save-base="' + escapeHtml(saveBase) + '" data-save-name="' + escapeHtml(favoriteName) + '" onclick="openGameSaves(event, this.getAttribute(\'data-save-name\'), this.getAttribute(\'data-save-base\'))" aria-label="Download saves" title="No local saves found">&#128190;</button>';
-      romDownloadButton = '<button class="rom-download-toggle" type="button" data-rom-path="' + escapeHtml(itemPath) + '" data-rom-name="' + escapeHtml(romName) + '" data-rom-extension="' + escapeHtml(item.hasOwnProperty('rom_extension') ? item.rom_extension : data.defaults.rom_extension || '') + '" onclick="downloadRom(event, this)" aria-label="Download ROM" title="Download ROM">&#10515;</button>';
-      favoriteButton = '<button class="favorite-toggle" type="button" data-menu-index="' + count + '" data-favorite-id="' + escapeHtml(favoriteId) + '" data-favorite-name="' + escapeHtml(favoriteName) + '" data-favorite-exact-name="' + escapeHtml(romName) + '" data-favorite-root="' + escapeHtml(root) + '" data-favorite-title="' + escapeHtml(itemTitle) + '" data-favorite-index="' + entry.originalIndex + '" data-favorite-variant-count="' + (entry.variantCount || 1) + '" onclick="toggleFavorite(event, this.getAttribute(\'data-favorite-id\'), this)" aria-label="Toggle favorite" title="Add to favorites">&hearts;</button>';
-    }
-    return '\
-      <div id="m' + count + '">\
-        <div id="h' + count + '" class="menu-wrap ' + shrink + '">\
-          <a onclick="launch(this)" id="i' + count + '" title="' + escapeHtml(launchTooltip || displayName) + '" ' + jsdata + '>\
-            ' + logo_html + '\
-          </a>' + saveButton + romDownloadButton + favoriteButton + '\
-        </div>\
-      </div>';
+      var favoriteButton = '';
+      var saveButton = '';
+      var romDownloadButton = '';
+      var infoButton = '';
+      if (itemType == 'game') {
+        saveButton = '<button class="save-toggle hidden" type="button" data-save-base="' + escapeHtml(saveBase) + '" data-save-name="' + escapeHtml(favoriteName) + '" onclick="openGameSaves(event, this.getAttribute(\'data-save-name\'), this.getAttribute(\'data-save-base\'))" aria-label="Download saves" title="No local saves found">&#128190;</button>';
+        infoButton = '<button class="info-toggle" type="button" data-menu-index="' + count + '" onclick="openMenuInfo(event, this)" aria-label="Game info" title="View game info">&#9432;</button>';
+        romDownloadButton = '<button class="rom-download-toggle" type="button" data-menu-index="' + count + '" data-variant-count="' + (entry.variantCount || 1) + '" data-rom-path="' + escapeHtml(itemPath) + '" data-rom-name="' + escapeHtml(romName) + '" data-rom-extension="' + escapeHtml(item.hasOwnProperty('rom_extension') ? item.rom_extension : data.defaults.rom_extension || '') + '" onclick="handleRomDownload(event, this)" aria-label="Download ROM" title="Download ROM">&#10515;</button>';
+        favoriteButton = '<button class="favorite-toggle" type="button" data-menu-index="' + count + '" data-favorite-id="' + escapeHtml(favoriteId) + '" data-favorite-name="' + escapeHtml(favoriteName) + '" data-favorite-exact-name="' + escapeHtml(romName) + '" data-favorite-root="' + escapeHtml(root) + '" data-favorite-title="' + escapeHtml(itemTitle) + '" data-favorite-index="' + entry.originalIndex + '" data-favorite-variant-count="' + (entry.variantCount || 1) + '" onclick="toggleFavorite(event, this.getAttribute(\'data-favorite-id\'), this)" aria-label="Toggle favorite" title="Add to favorites">&hearts;</button>';
+      }
+      return '\
+        <div id="m' + count + '">\
+          <div id="h' + count + '" class="menu-wrap ' + shrink + '">\
+            <a onclick="launch(this)" id="i' + count + '" title="' + escapeHtml(launchTooltip || displayName) + '" ' + jsdata + '>\
+              ' + logo_html + '\
+            </a>' + infoButton + saveButton + romDownloadButton + favoriteButton + '\
+          </div>\
+        </div>';
   }
   function renderVisibleEntries() {
     $('#games-list').empty();
@@ -2954,3 +3060,7 @@ window.onload = async function() {
     }
   });
 };
+
+window.handleRomDownload = handleRomDownload;
+window.openMenuInfo = openMenuInfo;
+window.closeInfoPanel = closeInfoPanel;

@@ -366,6 +366,7 @@ function renderLogsView() {
 
 function renderScansView() {
   $('#main').data('view', 'scans');
+  renderScansPage(scanJobsState);
   socket.emit('renderscans');
 }
 
@@ -585,7 +586,12 @@ async function renderRomsLanding(counts) {
       card.append($('<h2>').text(emu));
       card.append($('<p>').text('Roms: ' + counts[emu].roms));
       card.append($('<p>').text('Scanned: ' + counts[emu].hashes));
-      var button = $('<button>').addClass('scanbutton hover').attr('onclick', 'scanRoms(\'' + emu + '\');').text('Scan');
+      var button = $('<button>').addClass('scanbutton hover').text('Scan');
+      button.on('click', function(folder) {
+        return function() {
+          scanRoms(folder);
+        };
+      }(emu));
       card.append(button);
       $(cardContainer).append(card);
       var scanRendered = true;
@@ -594,7 +600,8 @@ async function renderRomsLanding(counts) {
       card.append($('<h2>').text('Default'));
       card.append($('<p>').text('Available: ' + counts[emu].available));
       card.append($('<p>').text('Downloaded: ' + counts[emu].downloaded));
-      var button = $('<button>').addClass('scanbutton hover').attr('onclick', 'dlDefaultFiles()').text('DL/Update');
+      var button = $('<button>').addClass('scanbutton hover').text('DL/Update');
+      button.on('click', dlDefaultFiles);
       card.append(button);
       $(cardContainer).append(card);
     };
@@ -836,7 +843,10 @@ async function renderRom(data) {
   $('#side').append($('<p>').text('Optional:'));
   let noArtButton = $('<button>').addClass('button hover').attr('onclick', 'purgeNoArt(\'' + folderName + '\');').text('Remove Roms with No Art');
   $('#side').append(noArtButton);
-  let newScanButton = $('<button>').addClass('button hover').attr('onclick', 'newScan(\'' + folderName + '\');').text('Scan for New Items');
+  let newScanButton = $('<button>').addClass('button hover').text('Scan for New Items');
+  newScanButton.on('click', function() {
+    newScan(folderName);
+  });
   $('#side').append(newScanButton);
   // Render items
   for await (var idItem of Object.keys(data[0])) {
@@ -1371,3 +1381,9 @@ function deleteProfile(user) {
   $('#main').append('<div class="loader"></div>');
   socket.emit('deleteprofile', user);
 }
+
+window.renderScansView = renderScansView;
+window.scanRoms = scanRoms;
+window.newScan = newScan;
+window.downloadArt = downloadArt;
+window.dlDefaultFiles = dlDefaultFiles;

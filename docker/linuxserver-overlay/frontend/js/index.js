@@ -830,7 +830,7 @@ function renderVariantPanel() {
       .attr('data-favorite-variant-count', '1')
       .attr('data-favorite-variant-choice', favoriteMode ? 'true' : 'false')
       .toggleClass('is-favorite', isFavorite(variant.id))
-      .text('♥');
+      .html('&hearts;');
     favoriteButton.on('click', function(favoriteId, element) {
       return function(event) {
         toggleFavorite(event, favoriteId, element);
@@ -1486,7 +1486,7 @@ function renderFavoritesPanel() {
     var openButton = $('<button>').addClass('search-result').attr('type', 'button').attr('onclick', 'openFavoriteResult("' + item.id + '")');
     openButton.append($('<span>').addClass('search-result-title').html('&hearts; ' + escapeHtml(cleanGameName(item.name, item.id))));
     openButton.append($('<span>').addClass('search-result-meta').text(item.title || item.root || 'Games'));
-    var removeButton = $('<button>').addClass('favorite-remove favorite-indicator is-favorite').attr('type', 'button').attr('title', 'Remove from favorites').attr('aria-label', 'Remove from favorites').text('♥');
+    var removeButton = $('<button>').addClass('favorite-remove favorite-indicator is-favorite').attr('type', 'button').attr('title', 'Remove from favorites').attr('aria-label', 'Remove from favorites').html('&hearts;');
     removeButton.on('click', function(favoriteId) {
       return function(event) {
         toggleFavorite(event, favoriteId);

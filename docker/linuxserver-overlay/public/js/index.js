@@ -834,7 +834,10 @@ async function renderRom(data) {
   });
   regionControls.append($('<label>').attr('for', 'preferredScanRegion').text('Preferred scan region'), regionSelect);
   $('#side').append(regionControls);
-  let downloadArtButton = $('<button>').addClass('button hover').attr('onclick', 'downloadArt(\'' + folderName + '\');').text('Download All Available Art');
+  let downloadArtButton = $('<button>').addClass('button hover').text('Download All Available Art');
+  downloadArtButton.on('click', function() {
+    downloadArt(folderName);
+  });
   $('#side').append($('<p>').text('Step 1:'));
   $('#side').append(downloadArtButton);
   let configButton = $('<button>').addClass('button hover').attr('onclick', 'addToConfig(\'' + folderName + '\');').text('Add All Roms to Config');

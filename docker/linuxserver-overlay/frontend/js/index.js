@@ -783,7 +783,7 @@ function variantSummary(variant) {
   if (variant.extraLabel) {
     bits.push(variant.extraLabel);
   }
-  return bits.join(' · ') || 'Default release';
+  return bits.join(' | ') || 'Default release';
 }
 function renderVariantPanel() {
   if (!variantPanelState || !variantPanelState.variants || variantPanelState.variants.length <= 1) {

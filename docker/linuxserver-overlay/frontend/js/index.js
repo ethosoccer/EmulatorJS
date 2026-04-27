@@ -874,18 +874,6 @@ function renderVariantPanel() {
     button.append($('<span>').addClass('variant-launch-title').text(safeDecodeDisplayName(variant.name)));
     button.append($('<span>').addClass('variant-launch-meta').text(variantSummary(variant)));
     var actions = $('<div>').addClass('variant-actions');
-    var infoButton = $('<button>')
-      .addClass('panel-icon-button info-button')
-      .attr('type', 'button')
-      .attr('title', tooltipText ? 'View version info' : 'No extra info')
-      .attr('aria-label', tooltipText ? 'View version info' : 'No extra info')
-      .html('&#9432;');
-    infoButton.on('click', function(item) {
-      return function(event) {
-        openVariantInfo(event, item, variantPanelState.title || item.name);
-      };
-    }(variant));
-    actions.append(infoButton);
     var downloadButton = $('<button>')
       .addClass('panel-icon-button')
       .attr('type', 'button')
@@ -1588,14 +1576,6 @@ function renderFavoritesPanel() {
     openButton.append($('<span>').addClass('search-result-title').html('&hearts; ' + escapeHtml(cleanGameName(item.name, item.id))));
     openButton.append($('<span>').addClass('search-result-meta').text(item.title || item.root || 'Games'));
     var actions = $('<div>').addClass('favorite-actions');
-    var infoText = variantTooltipText(item);
-    var infoButton = $('<button>').addClass('panel-icon-button info-button').attr('type', 'button').attr('title', infoText ? 'View version info' : 'No extra info').attr('aria-label', infoText ? 'View version info' : 'No extra info').html('&#9432;');
-    infoButton.on('click', function(favoriteItem) {
-      return function(event) {
-        openVariantInfo(event, favoriteItem, cleanGameName(favoriteItem.name, favoriteItem.id));
-      };
-    }(item));
-    actions.append(infoButton);
     var removeButton = $('<button>').addClass('panel-icon-button favorite-remove favorite-indicator is-favorite').attr('type', 'button').attr('title', 'Remove from favorites').attr('aria-label', 'Remove from favorites').html('&hearts;');
     removeButton.on('click', function(favoriteId) {
       return function(event) {
@@ -2586,10 +2566,8 @@ async function rendermenu(datas) {
       var favoriteButton = '';
       var saveButton = '';
       var romDownloadButton = '';
-      var infoButton = '';
       if (itemType == 'game') {
         saveButton = '<button class="save-toggle hidden" type="button" data-save-base="' + escapeHtml(saveBase) + '" data-save-name="' + escapeHtml(favoriteName) + '" onclick="openGameSaves(event, this.getAttribute(\'data-save-name\'), this.getAttribute(\'data-save-base\'))" aria-label="Download saves" title="No local saves found">&#128190;</button>';
-        infoButton = '<button class="info-toggle" type="button" data-menu-index="' + count + '" onclick="openMenuInfo(event, this)" aria-label="Game info" title="View game info">&#9432;</button>';
         romDownloadButton = '<button class="rom-download-toggle" type="button" data-menu-index="' + count + '" data-variant-count="' + (entry.variantCount || 1) + '" data-rom-path="' + escapeHtml(itemPath) + '" data-rom-name="' + escapeHtml(romName) + '" data-rom-extension="' + escapeHtml(item.hasOwnProperty('rom_extension') ? item.rom_extension : data.defaults.rom_extension || '') + '" onclick="handleRomDownload(event, this)" aria-label="Download ROM" title="Download ROM">&#10515;</button>';
         favoriteButton = '<button class="favorite-toggle" type="button" data-menu-index="' + count + '" data-favorite-id="' + escapeHtml(favoriteId) + '" data-favorite-name="' + escapeHtml(favoriteName) + '" data-favorite-exact-name="' + escapeHtml(romName) + '" data-favorite-root="' + escapeHtml(root) + '" data-favorite-title="' + escapeHtml(itemTitle) + '" data-favorite-index="' + entry.originalIndex + '" data-favorite-variant-count="' + (entry.variantCount || 1) + '" onclick="toggleFavorite(event, this.getAttribute(\'data-favorite-id\'), this)" aria-label="Toggle favorite" title="Add to favorites">&hearts;</button>';
       }
@@ -2598,7 +2576,7 @@ async function rendermenu(datas) {
           <div id="h' + count + '" class="menu-wrap ' + shrink + '">\
             <a onclick="launch(this)" id="i' + count + '" title="' + escapeHtml(launchTooltip || displayName) + '" ' + jsdata + '>\
               ' + logo_html + '\
-            </a>' + infoButton + saveButton + romDownloadButton + favoriteButton + '\
+            </a>' + saveButton + romDownloadButton + favoriteButton + '\
           </div>\
         </div>';
   }
@@ -3062,5 +3040,3 @@ window.onload = async function() {
 };
 
 window.handleRomDownload = handleRomDownload;
-window.openMenuInfo = openMenuInfo;
-window.closeInfoPanel = closeInfoPanel;

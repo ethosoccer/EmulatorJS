@@ -259,10 +259,10 @@ socket.on('scanjobs', function(jobs) {
   if ($('#main').data('view') === 'scans') {
     renderScansPage(scanJobsState);
   }
-  if (activeScanJobId) {
+  if (activeScanJobId && $('#modal').css('display') !== 'none' && $('#modal').data('modalType') === 'scan-job') {
     var activeJob = getScanJob(activeScanJobId);
     if (activeJob) {
-      renderScanJobModal(activeJob);
+      renderScanJobModal(activeJob, {preserveScroll: true});
     }
   }
 });
@@ -439,6 +439,7 @@ function scanStatusLabel(status) {
 function openScanLauncher(config) {
   scanLauncherConfig = config || null;
   activeScanJobId = '';
+  $('#modal').data('modalType', 'scan-launcher');
   emptyModal();
   var card = $('<div>').addClass('scan-modal');
   card.append($('<h2>').text(config.title || 'Start Scan'));
@@ -491,11 +492,18 @@ function startScanJob(mode) {
   socket.emit('startscanjob', payload);
 }
 
-function renderScanJobModal(job) {
+function renderScanJobModal(job, options) {
   if (!job) {
     return;
   }
+  options = options || {};
   activeScanJobId = job.id;
+  $('#modal').data('modalType', 'scan-job');
+  var modal = $('#modal');
+  var modalScrollTop = options.preserveScroll ? modal.scrollTop() : 0;
+  var pageScrollTop = options.preserveScroll ? $(window).scrollTop() : 0;
+  var logPane = modal.find('.scan-job-log');
+  var logScrollTop = options.preserveScroll && logPane.length ? logPane.scrollTop() : 0;
   emptyModal();
   var card = $('<div>').addClass('scan-modal');
   card.append($('<h2>').text(job.label || scanTypeLabel(job.type)));
@@ -524,6 +532,11 @@ function renderScanJobModal(job) {
   card.append($('<pre>').addClass('scan-job-log').text((job.logs || []).join('\n') || 'No output yet.'));
   $('#modal-content').append(card);
   showModal();
+  if (options.preserveScroll) {
+    modal.scrollTop(modalScrollTop);
+    $(window).scrollTop(pageScrollTop);
+    modal.find('.scan-job-log').scrollTop(logScrollTop);
+  }
   clearInlineScanLauncher();
   if ($('#modal').css('display') === 'none') {
     showInlineScanLauncher(card.clone(true, true));
@@ -703,6 +716,8 @@ function showModal() {
 // Close modal
 function closeModal() {
   scanLauncherConfig = null;
+  activeScanJobId = '';
+  $('#modal').removeData('modalType');
   emptyModal();
   clearInlineScanLauncher();
   $('body').removeClass('modal-open');

@@ -370,11 +370,6 @@ body.profile-required .login-panel {
   font-size: 17px;
 }
 
-.panel-icon-button.info-button {
-  font-weight: 700;
-  font-size: 18px;
-}
-
 body.profile-required .login-panel {
   position: fixed;
   top: 50%;
@@ -564,24 +559,6 @@ body.profile-required .profile-login-copy {
   right: 42px;
 }
 
-.info-toggle {
-  position: absolute;
-  right: 126px;
-  top: 50%;
-  z-index: 2;
-  width: 34px;
-  height: 34px;
-  transform: translateY(-50%);
-  border: 1px solid rgba(255, 255, 255, .5);
-  border-radius: 8px;
-  background: rgba(0, 0, 0, .34);
-  color: white;
-  cursor: pointer;
-  font-size: 17px;
-  font-weight: 700;
-  line-height: 1;
-}
-
 .save-toggle {
   position: absolute;
   right: 84px;
@@ -615,11 +592,6 @@ body.profile-required .profile-login-copy {
   color: #ffcf6b;
 }
 
-.info-toggle:hover,
-.info-toggle:focus-visible {
-  background: rgba(255, 255, 255, .14);
-}
-
 .menu-wrap {
   position: relative;
 }
@@ -627,13 +599,6 @@ body.profile-required .profile-login-copy {
 .menu-wrap a {
   display: inline-block;
   padding-right: 168px;
-}
-
-.info-panel-copy {
-  margin: 0;
-  color: rgba(255, 255, 255, .78);
-  line-height: 1.5;
-  white-space: pre-wrap;
 }
 
 .profile-tabs {

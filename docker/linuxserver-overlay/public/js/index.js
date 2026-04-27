@@ -697,7 +697,7 @@ function emptyModal() {
 
 function showModal() {
   $('body').addClass('modal-open');
-  $('#modal').stop(true, true).css({'display': 'block', 'z-index': 100000});
+  $('#modal').css({'display': 'block', 'z-index': 100000});
 }
 
 // Close modal
@@ -706,7 +706,7 @@ function closeModal() {
   emptyModal();
   clearInlineScanLauncher();
   $('body').removeClass('modal-open');
-  $('#modal').hide()
+  $('#modal').css('display', 'none');
 }
 
 // Render config file list
@@ -902,7 +902,7 @@ function romMenu(cleanName) {
   $('#modal').data('name', name);
   emptyModal();
   $('#modal-content').append('<div class="loader"></div>');
-  $('#modal').toggle(100);
+  showModal();
   socket.emit('getromdata', [dir, name]);
 }
 

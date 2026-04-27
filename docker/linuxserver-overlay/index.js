@@ -585,6 +585,8 @@ function defaultSettings() {
     passwordResetWebhook: '',
     localLogsEnabled: true,
     localLogRetentionDays: 90,
+    localScansEnabled: true,
+    localScanRetentionDays: 90,
     influxEnabled: false,
     influxUrl: '',
     influxOrg: '',
@@ -942,6 +944,7 @@ function buildInfluxLine(payload) {
     'source=' + escapeInfluxTag(payload.source || 'unknown')
   ].join(',');
   let game = payload.game || {};
+  let scan = payload.scan || {};
   let fields = [
     'count=1i',
     'title=' + escapeInfluxField(payload.title || ''),
@@ -958,6 +961,17 @@ function buildInfluxLine(payload) {
     'console=' + escapeInfluxField(game.console || ''),
     'console_title=' + escapeInfluxField(game.consoleTitle || ''),
     'emulator=' + escapeInfluxField(game.emulator || ''),
+    'scan_id=' + escapeInfluxField(scan.id || ''),
+    'scan_type=' + escapeInfluxField(scan.type || ''),
+    'scan_target=' + escapeInfluxField(scan.target || ''),
+    'scan_mode=' + escapeInfluxField(scan.mode || ''),
+    'scan_total_items=' + parseInt(scan.totalItems || 0, 10) + 'i',
+    'scan_processed_items=' + parseInt(scan.processedItems || 0, 10) + 'i',
+    'scan_new_items=' + parseInt(scan.newItems || 0, 10) + 'i',
+    'scan_changed_items=' + parseInt(scan.changedItems || 0, 10) + 'i',
+    'scan_skipped_items=' + parseInt(scan.skippedItems || 0, 10) + 'i',
+    'scan_downloaded_items=' + parseInt(scan.downloadedItems || 0, 10) + 'i',
+    'scan_failed_items=' + parseInt(scan.failedItems || 0, 10) + 'i',
     'details_json=' + escapeInfluxField(JSON.stringify(payload))
   ].join(',');
   return 'emulatorjs_events,' + tags + ' ' + fields;
@@ -1083,6 +1097,114 @@ async function emitActivityWebhook(req, payload) {
   } catch (e) {
     console.log('Webhook send failed', e);
     return false;
+  }
+}
+
+function countRomFiles(dir) {
+  let romDir = dataRoot + dir + '/roms/';
+  if (!fs.existsSync(romDir)) {
+    return 0;
+  }
+  return fs.readdirSync(romDir).filter(function(file) {
+    return fs.statSync(path.join(romDir, file)).isFile();
+  }).length;
+}
+
+function countMissingHashes(dir) {
+  let romDir = dataRoot + dir + '/roms/';
+  let shaDir = hashPath + dir + '/roms/';
+  if (!fs.existsSync(romDir)) {
+    return 0;
+  }
+  return fs.readdirSync(romDir).filter(function(file) {
+    if (!fs.statSync(path.join(romDir, file)).isFile()) {
+      return false;
+    }
+    return !fs.existsSync(path.join(shaDir, file + '.sha1'));
+  }).length;
+}
+
+function countExistingScanFlags(dir) {
+  let rescanDir = hashPath + dir + '/rescan/';
+  if (!fs.existsSync(rescanDir)) {
+    return 0;
+  }
+  return fs.readdirSync(rescanDir).filter(function(file) {
+    return file.endsWith('.rescan');
+  }).length;
+}
+
+function buildScanEventPayload(job) {
+  let result = job && job.result ? job.result : {};
+  let scanSummary = {
+    id: job.id,
+    type: job.type || '',
+    label: job.label || '',
+    target: job.dir || '',
+    mode: job.mode || '',
+    status: job.status || '',
+    startedAt: job.startedAt || '',
+    endedAt: job.endedAt || '',
+    totalItems: parseInt(result.totalItems || 0, 10),
+    processedItems: parseInt(result.processedItems || 0, 10),
+    newItems: parseInt(result.newItems || 0, 10),
+    changedItems: parseInt(result.changedItems || 0, 10),
+    skippedItems: parseInt(result.skippedItems || 0, 10),
+    downloadedItems: parseInt(result.downloadedItems || 0, 10),
+    failedItems: parseInt(result.failedItems || 0, 10),
+    exitCode: typeof result.exitCode === 'number' ? result.exitCode : ''
+  };
+  if (result.preferredRegion) {
+    scanSummary.preferredRegion = result.preferredRegion;
+  }
+  if (typeof result.autoLinkedItems === 'number') {
+    scanSummary.autoLinkedItems = result.autoLinkedItems;
+  }
+  return {
+    app: 'EmulatorJS',
+    title: 'EmulatorJS ' + (job.label || 'scan') + ' ' + (job.status || 'completed'),
+    event: 'scan_' + (job.status || 'completed'),
+    action: 'scan',
+    status: job.status === 'completed' ? 'success' : (job.status === 'canceled' ? 'blocked' : 'failed'),
+    source: 'admin-scan',
+    username: existingSession ? existingSession.user : '',
+    role: existingSession ? existingSession.role : '',
+    time: job.endedAt || new Date().toISOString(),
+    ip: socket.handshake.address || '',
+    host: socket.handshake.headers.host || '',
+    origin: socket.handshake.headers.origin || '',
+    referer: socket.handshake.headers.referer || '',
+    requestPath: baseUrl,
+    scan: scanSummary,
+    details: {
+      error: job.error || '',
+      logs: (job.logs || []).slice(-200),
+      result: result
+    }
+  };
+}
+
+async function persistAndForwardScan(job) {
+  if (!job) {
+    return;
+  }
+  let settings = await readSettings();
+  let eventPayload = buildScanEventPayload(job);
+  if (settings.localScansEnabled !== false) {
+    runLogDb('write-scan', {
+      retentionDays: settings.localScanRetentionDays || 90,
+      entry: eventPayload
+    });
+  }
+  try {
+    if (settings.passwordResetWebhook) {
+      await sendWebhook(settings.passwordResetWebhook, eventPayload);
+    }
+    if (settings.influxEnabled) {
+      await sendInflux(settings, eventPayload);
+    }
+  } catch (e) {
+    console.log('Scan telemetry send failed', e);
   }
 }
 
@@ -1318,7 +1440,35 @@ io.on('connection', async function (socket) {
   };
 
   function renderScansView() {
-    socket.emit('renderscans', currentSerializedScanJobs());
+    readSettings().then(function(settings) {
+      let scans = runLogDb('query-scans', {filters: {limit: 200}});
+      socket.emit('renderscans', {
+        jobs: currentSerializedScanJobs(),
+        scans: scans.scans || [],
+        total: scans.total || 0,
+        settings: {
+          localScansEnabled: settings.localScansEnabled !== false,
+          localScanRetentionDays: settings.localScanRetentionDays || 90,
+          webhookConfigured: !!settings.passwordResetWebhook,
+          influxEnabled: settings.influxEnabled === true,
+          influxConfigured: !!(settings.influxEnabled && settings.influxUrl && settings.influxOrg && settings.influxBucket && settings.influxToken)
+        }
+      });
+    }).catch(function(e) {
+      console.log('Unable to render scans view', e);
+      socket.emit('renderscans', {
+        jobs: currentSerializedScanJobs(),
+        scans: [],
+        total: 0,
+        settings: {
+          localScansEnabled: true,
+          localScanRetentionDays: 90,
+          webhookConfigured: false,
+          influxEnabled: false,
+          influxConfigured: false
+        }
+      });
+    });
   }
 
   function emitScanJobsToSocket() {
@@ -1358,6 +1508,7 @@ io.on('connection', async function (socket) {
         appendScanJobLog(job, 'ERROR: ' + (e && e.message ? e.message : e));
       }
     }
+    await persistAndForwardScan(job);
     return job;
   }
 
@@ -1405,6 +1556,15 @@ io.on('connection', async function (socket) {
     await writeSettings(settings);
     await renderLogs(data.filters || {});
     socket.emit('modaldata', 'Saved log settings.');
+  }
+
+  async function saveScanSettings(data) {
+    let settings = await readSettings();
+    settings.localScansEnabled = data.localScansEnabled !== false;
+    settings.localScanRetentionDays = Math.max(1, Math.min(parseInt(data.localScanRetentionDays || 90, 10) || 90, 3650));
+    await writeSettings(settings);
+    await renderScansView();
+    socket.emit('modaldata', 'Saved scan settings.');
   }
 
   async function testLogInflux(data) {
@@ -1607,15 +1767,21 @@ io.on('connection', async function (socket) {
     return await executeScanJob('default-files', 'default', 'update', 'Default files update', async function(job) {
       var metaData = await fsw.readFile('./metadata/default_files.json', 'utf8');
       metaData = JSON.parse(metaData);
+      var ensuredDirectories = 0;
+      var downloadedFiles = 0;
       for await (var item of metaData) {
         ensureScanNotCanceled(job);
         var file = item.file.replace('/data/', dataRoot);
         var cid = item.cid;
         if (cid == 'directory') {
           await fsw.mkdir(file, { recursive: true });
+          ensuredDirectories++;
           appendScanJobLog(job, 'Ensured directory: ' + file);
         } else {
-          await ipfsDownload(cid, file, 0, {job: job});
+          let success = await ipfsDownload(cid, file, 0, {job: job});
+          if (success) {
+            downloadedFiles++;
+          }
         }
       };
       for await (var dir of emus) {
@@ -1631,7 +1797,16 @@ io.on('connection', async function (socket) {
       };
       appendScanJobLog(job, 'Downloaded all default files.');
       await renderRoms();
-      return {downloaded: metaData.length};
+      return {
+        totalItems: metaData.length,
+        processedItems: ensuredDirectories + downloadedFiles,
+        newItems: downloadedFiles,
+        changedItems: downloadedFiles,
+        downloadedItems: downloadedFiles,
+        skippedItems: 0,
+        failedItems: Math.max(metaData.length - (ensuredDirectories + downloadedFiles), 0),
+        ensuredDirectories: ensuredDirectories
+      };
     });
   };
 
@@ -1642,6 +1817,9 @@ io.on('connection', async function (socket) {
     let preferredRegion = data[2] || '';
     let mode = fullScan ? 'all' : 'new';
     return await executeScanJob('rom-scan', folder, mode, 'ROM scan for ' + folder, async function(job) {
+      let totalItems = countRomFiles(folder);
+      let newItems = fullScan ? totalItems : countMissingHashes(folder);
+      let changedItems = countExistingScanFlags(folder);
       let pendingRescans = await applyPendingRescans(folder);
       if (pendingRescans > 0) {
         appendScanJobLog(job, 'Queued rescan for ' + pendingRescans + ' item(s).');
@@ -1664,10 +1842,11 @@ io.on('connection', async function (socket) {
       });
       job.process = null;
       appendScanJobLog(job, 'Scan exited with code: ' + code);
+      let autoLinkedItems = 0;
       if (!job.cancelRequested && preferredRegion) {
         try {
-          let linked = await autoIdentifyPreferredRegion(folder, preferredRegion);
-          appendScanJobLog(job, 'Preferred region auto-linked ' + linked + ' item(s).');
+          autoLinkedItems = await autoIdentifyPreferredRegion(folder, preferredRegion);
+          appendScanJobLog(job, 'Preferred region auto-linked ' + autoLinkedItems + ' item(s).');
         } catch(e) {
           console.log(e);
           appendScanJobLog(job, 'Preferred region auto-link failed.');
@@ -1686,7 +1865,18 @@ io.on('connection', async function (socket) {
       if (code !== 0) {
         throw new Error('Scan exited with code ' + code + '.');
       }
-      return {exitCode: code, preferredRegion: preferredRegion || ''};
+      let processedItems = fullScan ? totalItems : Math.min(totalItems, newItems + pendingRescans);
+      return {
+        exitCode: code,
+        preferredRegion: preferredRegion || '',
+        totalItems: totalItems,
+        processedItems: processedItems,
+        newItems: newItems,
+        changedItems: changedItems,
+        skippedItems: Math.max(totalItems - processedItems, 0),
+        failedItems: 0,
+        autoLinkedItems: autoLinkedItems
+      };
     });
   };
 
@@ -1814,6 +2004,7 @@ io.on('connection', async function (socket) {
       var shaPath = hashPath + dir + '/roms/';
       var files = await fsw.readdir(shaPath);
       var artCache = {};
+      var totalItems = files.length;
       var downloadedCount = 0;
       var skippedCount = 0;
       var failedCount = 0;
@@ -1880,8 +2071,15 @@ io.on('connection', async function (socket) {
       appendScanJobLog(job, 'Art download complete. Downloaded/Copied: ' + downloadedCount + ', Skipped: ' + skippedCount + ', Failed: ' + failedCount);
       await getRoms(dir);
       return {
+        totalItems: totalItems,
+        processedItems: downloadedCount + skippedCount + failedCount,
+        newItems: downloadedCount,
+        changedItems: downloadedCount,
         downloadedCount: downloadedCount,
+        downloadedItems: downloadedCount,
+        skippedItems: skippedCount,
         skippedCount: skippedCount,
+        failedItems: failedCount,
         failedCount: failedCount
       };
     });
@@ -2229,6 +2427,7 @@ io.on('connection', async function (socket) {
         return;
       }
       socket.adminAuthenticated = true;
+      existingSession = {user: profile.username, role: profile.role};
       socket.emit('adminauth', {status: 'success', user: profile.username, role: profile.role});
       emitScanJobsToSocket();
       await renderInitialAdminPage();
@@ -2256,6 +2455,7 @@ io.on('connection', async function (socket) {
   socket.on('renderscans', requireAdmin(renderScansView));
   socket.on('startscanjob', requireAdmin(startScanJobRequest));
   socket.on('savelogsettings', requireAdmin(saveLogSettings));
+  socket.on('savescansettings', requireAdmin(saveScanSettings));
   socket.on('testlogsinflux', requireAdmin(testLogInflux));
   socket.on('createprofile', requireAdmin(createProfile));
   socket.on('deleteprofile', requireAdmin(deleteProfile));

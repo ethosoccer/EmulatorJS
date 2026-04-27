@@ -9,6 +9,8 @@ var logTimezoneStorageKey = 'ejs-admin-log-timezone';
 var browserTimezone = (Intl && Intl.DateTimeFormat().resolvedOptions().timeZone) || 'UTC';
 var logTimezone = localStorage.getItem(logTimezoneStorageKey) || browserTimezone;
 var scanJobsState = [];
+var scanHistoryState = [];
+var scanSettingsState = {};
 var activeScanJobId = '';
 var scanLauncherConfig = null;
 
@@ -253,11 +255,18 @@ socket.on('renderfiledirs', renderFileDirs);
 // Render file directories
 socket.on('renderprofiles', renderProfiles);
 socket.on('renderlogs', renderLogsPage);
-socket.on('renderscans', renderScansPage);
+socket.on('renderscans', function(payload) {
+  renderScansPage(payload);
+});
 socket.on('scanjobs', function(jobs) {
   scanJobsState = Array.isArray(jobs) ? jobs : [];
   if ($('#main').data('view') === 'scans') {
-    renderScansPage(scanJobsState);
+    renderScansPage({
+      jobs: scanJobsState,
+      scans: scanHistoryState,
+      total: scanHistoryState.length,
+      settings: scanSettingsState
+    });
   }
   if (activeScanJobId && $('#modal').css('display') !== 'none' && $('#modal').data('modalType') === 'scan-job') {
     var activeJob = getScanJob(activeScanJobId);
@@ -514,6 +523,25 @@ function renderScanJobModal(job, options) {
   if (job.endedAt) {
     summary.append($('<div>').append($('<strong>').text('Ended')).append($('<span>').text(formatLogTimestamp(job.endedAt, logTimezone))));
   }
+  var result = job.result || {};
+  if (result.totalItems) {
+    summary.append($('<div>').append($('<strong>').text('Total')).append($('<span>').text(result.totalItems)));
+  }
+  if (result.newItems) {
+    summary.append($('<div>').append($('<strong>').text('New')).append($('<span>').text(result.newItems)));
+  }
+  if (result.changedItems) {
+    summary.append($('<div>').append($('<strong>').text('Changed')).append($('<span>').text(result.changedItems)));
+  }
+  if (result.downloadedItems) {
+    summary.append($('<div>').append($('<strong>').text('Downloaded')).append($('<span>').text(result.downloadedItems)));
+  }
+  if (result.skippedItems) {
+    summary.append($('<div>').append($('<strong>').text('Skipped')).append($('<span>').text(result.skippedItems)));
+  }
+  if (result.failedItems) {
+    summary.append($('<div>').append($('<strong>').text('Failed')).append($('<span>').text(result.failedItems)));
+  }
   card.append(summary);
   if (job.error) {
     card.append($('<div>').addClass('scan-job-error').text(job.error));
@@ -555,59 +583,125 @@ function cancelScanJob(scanId) {
   socket.emit('cancelscanjob', scanId);
 }
 
-function renderScansPage(jobs) {
-  jobs = Array.isArray(jobs) ? jobs : scanJobsState;
+function renderScansPage(payload) {
+  payload = payload || {};
+  if (Array.isArray(payload)) {
+    payload = {jobs: payload, scans: scanHistoryState, total: scanHistoryState.length, settings: scanSettingsState};
+  }
+  var jobs = Array.isArray(payload.jobs) ? payload.jobs : scanJobsState;
+  var scans = Array.isArray(payload.scans) ? payload.scans : scanHistoryState;
+  var settings = payload.settings || scanSettingsState || {};
   scanJobsState = jobs;
+  scanHistoryState = scans;
+  scanSettingsState = settings;
   $('#main').data('view', 'scans');
   $('#main').empty();
   $('#side').empty();
   $('#nav-buttons').empty();
   var wrapper = $('<div>').addClass('logs-page');
   wrapper.append($('<div>').addClass('logs-header')
-    .append($('<div>').append($('<h1>').text('Scans')).append($('<p>').addClass('logs-subtitle').text('View all scan jobs, reopen progress, and cancel active work.')))
-    .append($('<div>').addClass('logs-status').text(jobs.filter(function(job) {
+    .append($('<div>').append($('<h1>').text('Scans')).append($('<p>').addClass('logs-subtitle').text('View active scans, saved scan history, and where items changed.')))
+    .append($('<div>').attr('id', 'scans-status').addClass('logs-status').text(jobs.filter(function(job) {
       return job.status === 'running' || job.status === 'canceling';
-    }).length + ' active')));
+    }).length + ' active | ' + scans.length + ' stored of ' + (payload.total || scans.length))));
+
+  var settingsCard = $('<div>').addClass('card logs-card');
+  settingsCard.append($('<h3>').text('Storage & Retention'));
+  var settingsGrid = $('<div>').addClass('logs-filter-grid logs-settings-grid');
+  settingsGrid.append($('<label>').text('Local scan history enabled').append($('<input>').attr({id: 'localScansEnabled', type: 'checkbox'}).prop('checked', settings.localScansEnabled !== false)));
+  settingsGrid.append($('<label>').text('Retention (days)').append($('<input>').attr({id: 'localScanRetentionDays', type: 'number', min: 1, max: 3650}).val(settings.localScanRetentionDays || 90)));
+  settingsCard.append(settingsGrid);
+  settingsCard.append($('<div>').addClass('logs-inline-note').text('Webhook and Influx forwarding reuse the Activity Logs settings. Webhook: ' + (settings.webhookConfigured ? 'configured' : 'not configured') + '. Influx: ' + (settings.influxConfigured ? 'configured' : (settings.influxEnabled ? 'enabled but incomplete' : 'disabled')) + '.'));
+  settingsCard.append($('<div>').addClass('logs-button-row')
+    .append($('<button>').addClass('button hover').attr('type', 'button').on('click', saveScanSettings).text('Save Scan Settings'))
+    .append($('<button>').addClass('button hover').attr('type', 'button').on('click', renderLogsView).text('Open Activity Log Settings')));
+  wrapper.append(settingsCard);
+
+  var activeCard = $('<div>').addClass('card logs-card');
+  activeCard.append($('<h3>').text('Active / Recent Jobs'));
   if (!jobs.length) {
-    wrapper.append($('<div>').addClass('card logs-card').append($('<p>').addClass('logs-empty').text('No scans have run yet.')));
-    $('#main').append(wrapper);
-    return;
-  }
-  var tableCard = $('<div>').addClass('card logs-card');
-  tableCard.append($('<h3>').text('Scan Jobs'));
-  var tableWrap = $('<div>').addClass('logs-table-wrap');
-  var table = $('<table>').addClass('logs-table');
-  table.append($('<thead>').append($('<tr>')
-    .append($('<th>').text('When'))
-    .append($('<th>').text('Type'))
-    .append($('<th>').text('Target'))
-    .append($('<th>').text('Mode'))
-    .append($('<th>').text('Status'))
-    .append($('<th>').text('Actions'))));
-  var body = $('<tbody>');
-  jobs.forEach(function(job) {
-    var row = $('<tr>');
-    row.append($('<td>').text(formatLogTimestamp(job.startedAt, logTimezone)));
-    row.append($('<td>').text(scanTypeLabel(job.type)));
-    row.append($('<td>').text(job.dir || 'default'));
-    row.append($('<td>').text(scanModeLabel(job.mode)));
-    row.append($('<td>').text(scanStatusLabel(job.status)));
-    var actions = $('<div>').addClass('logs-button-row');
-    actions.append($('<button>').addClass('button hover').attr('type', 'button').on('click', function() {
-      openScanJobModal(job.id);
-    }).text('Open'));
-    if (job.status === 'running' || job.status === 'canceling') {
+    activeCard.append($('<p>').addClass('logs-empty').text('No scan jobs are active right now.'));
+  } else {
+    var tableWrap = $('<div>').addClass('logs-table-wrap');
+    var table = $('<table>').addClass('logs-table');
+    table.append($('<thead>').append($('<tr>')
+      .append($('<th>').text('When'))
+      .append($('<th>').text('Type'))
+      .append($('<th>').text('Target'))
+      .append($('<th>').text('Mode'))
+      .append($('<th>').text('Status'))
+      .append($('<th>').text('Summary'))
+      .append($('<th>').text('Actions'))));
+    var body = $('<tbody>');
+    jobs.forEach(function(job) {
+      var row = $('<tr>');
+      var result = job.result || {};
+      var summaryBits = [];
+      if (result.totalItems) summaryBits.push('Total: ' + result.totalItems);
+      if (result.newItems) summaryBits.push('New: ' + result.newItems);
+      if (result.changedItems) summaryBits.push('Changed: ' + result.changedItems);
+      if (result.downloadedItems) summaryBits.push('Downloaded: ' + result.downloadedItems);
+      if (result.failedItems) summaryBits.push('Failed: ' + result.failedItems);
+      row.append($('<td>').text(formatLogTimestamp(job.startedAt, logTimezone)));
+      row.append($('<td>').text(scanTypeLabel(job.type)));
+      row.append($('<td>').text(job.dir || 'default'));
+      row.append($('<td>').text(scanModeLabel(job.mode)));
+      row.append($('<td>').text(scanStatusLabel(job.status)));
+      row.append($('<td>').text(summaryBits.join(' | ') || '-'));
+      var actions = $('<div>').addClass('logs-button-row');
       actions.append($('<button>').addClass('button hover').attr('type', 'button').on('click', function() {
-        cancelScanJob(job.id);
-      }).text('Cancel'));
-    }
-    row.append($('<td>').append(actions));
-    body.append(row);
-  });
-  table.append(body);
-  tableWrap.append(table);
-  tableCard.append(tableWrap);
-  wrapper.append(tableCard);
+        openScanJobModal(job.id);
+      }).text('Open'));
+      if (job.status === 'running' || job.status === 'canceling') {
+        actions.append($('<button>').addClass('button hover').attr('type', 'button').on('click', function() {
+          cancelScanJob(job.id);
+        }).text('Cancel'));
+      }
+      row.append($('<td>').append(actions));
+      body.append(row);
+    });
+    table.append(body);
+    tableWrap.append(table);
+    activeCard.append(tableWrap);
+  }
+  wrapper.append(activeCard);
+
+  var historyCard = $('<div>').addClass('card logs-card');
+  historyCard.append($('<h3>').text('Stored Scan History'));
+  if (!scans.length) {
+    historyCard.append($('<p>').addClass('logs-empty').text('No completed scan history has been stored yet.'));
+  } else {
+    var historyWrap = $('<div>').addClass('logs-table-wrap');
+    var historyTable = $('<table>').addClass('logs-table');
+    historyTable.append($('<thead>').append($('<tr>')
+      .append($('<th>').text('When'))
+      .append($('<th>').text('Type'))
+      .append($('<th>').text('Target'))
+      .append($('<th>').text('Mode'))
+      .append($('<th>').text('Status'))
+      .append($('<th>').text('Summary'))));
+    var historyBody = $('<tbody>');
+    scans.forEach(function(scan) {
+      var summaryBits = [];
+      if (scan.total_items) summaryBits.push('Total: ' + scan.total_items);
+      if (scan.new_items) summaryBits.push('New: ' + scan.new_items);
+      if (scan.changed_items) summaryBits.push('Changed: ' + scan.changed_items);
+      if (scan.downloaded_items) summaryBits.push('Downloaded: ' + scan.downloaded_items);
+      if (scan.skipped_items) summaryBits.push('Skipped: ' + scan.skipped_items);
+      if (scan.failed_items) summaryBits.push('Failed: ' + scan.failed_items);
+      historyBody.append($('<tr>')
+        .append($('<td>').text(formatLogTimestamp(scan.timestamp, logTimezone)))
+        .append($('<td>').text(scanTypeLabel(scan.scan_type)))
+        .append($('<td>').text(scan.target || 'default'))
+        .append($('<td>').text(scanModeLabel(scan.mode)))
+        .append($('<td>').text(scanStatusLabel(scan.status)))
+        .append($('<td>').text(summaryBits.join(' | ') || '-')));
+    });
+    historyTable.append(historyBody);
+    historyWrap.append(historyTable);
+    historyCard.append(historyWrap);
+  }
+  wrapper.append(historyCard);
   $('#main').append(wrapper);
 }
 
@@ -1182,6 +1276,13 @@ function saveLogSettings() {
     influxToken: $('#influxToken').val(),
     clearInfluxToken: $('#clearInfluxToken').is(':checked'),
     filters: logFilters
+  });
+}
+
+function saveScanSettings() {
+  socket.emit('savescansettings', {
+    localScansEnabled: $('#localScansEnabled').is(':checked'),
+    localScanRetentionDays: $('#localScanRetentionDays').val()
   });
 }
 

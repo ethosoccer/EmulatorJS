@@ -34,6 +34,8 @@ var saveInventoryCache;
 var saveInventoryLoading;
 var savePanelBackHandler = null;
 var variantPanelState = null;
+var pendingLaunchSelection = null;
+var activeFrontPanelSelector = null;
 var requireMainLogin = false;
 var isSafari = navigator.vendor && navigator.vendor.indexOf('Apple') > -1 &&
                navigator.userAgent &&
@@ -177,6 +179,113 @@ function freshJsonUrl(url) {
 function fetchFreshJson(url) {
   return fetch(freshJsonUrl(url), Init);
 }
+function getFrontPanelSelectors() {
+  return ['#search-panel', '#favorites-panel', '#save-panel', '#variant-panel', '#login-panel'];
+}
+function getActiveFrontPanel() {
+  if (activeFrontPanelSelector && !$(activeFrontPanelSelector).hasClass('hidden')) {
+    return activeFrontPanelSelector;
+  }
+  var selectors = getFrontPanelSelectors();
+  for (var i = selectors.length - 1; i >= 0; i--) {
+    if (!$(selectors[i]).hasClass('hidden')) {
+      activeFrontPanelSelector = selectors[i];
+      return activeFrontPanelSelector;
+    }
+  }
+  activeFrontPanelSelector = null;
+  return null;
+}
+function panelFocusableElements(selector) {
+  if (!selector) {
+    return $();
+  }
+  return $(selector).find('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')
+    .filter(':visible');
+}
+function focusFrontPanel(selector, preferredSelector) {
+  if (!selector || $(selector).hasClass('hidden')) {
+    return;
+  }
+  activeFrontPanelSelector = selector;
+  var $panel = $(selector);
+  $panel.attr('tabindex', '-1');
+  getFrontPanelSelectors().forEach(function(item) {
+    $(item).toggleClass('is-active-panel', item === selector && !$(item).hasClass('hidden'));
+  });
+  var $preferred = preferredSelector ? $panel.find(preferredSelector).filter(':visible').first() : $();
+  var $focusables = panelFocusableElements(selector);
+  var $target = $preferred.length ? $preferred : ($focusables.length ? $focusables.first() : $panel);
+  setTimeout(function() {
+    try {
+      $target.trigger('focus');
+    } catch (e) {
+      try {
+        $panel.trigger('focus');
+      } catch (ignore) {}
+    }
+  }, 0);
+}
+function clearFrontPanelFocus(selector) {
+  if (!selector || activeFrontPanelSelector === selector) {
+    activeFrontPanelSelector = null;
+  }
+  getFrontPanelSelectors().forEach(function(item) {
+    $(item).removeClass('is-active-panel');
+  });
+}
+function moveFrontPanelFocus(delta) {
+  var selector = getActiveFrontPanel();
+  if (!selector) {
+    return false;
+  }
+  var $focusables = panelFocusableElements(selector);
+  if (!$focusables.length) {
+    focusFrontPanel(selector);
+    return true;
+  }
+  var current = document.activeElement;
+  var currentIndex = $focusables.toArray().indexOf(current);
+  if (currentIndex < 0) {
+    currentIndex = 0;
+  }
+  var nextIndex = (currentIndex + delta + $focusables.length) % $focusables.length;
+  $focusables.eq(nextIndex).trigger('focus');
+  return true;
+}
+function activateFrontPanelControl() {
+  var selector = getActiveFrontPanel();
+  if (!selector) {
+    return false;
+  }
+  var current = document.activeElement;
+  if (current && $(current).closest(selector).length) {
+    $(current).trigger('click');
+    return true;
+  }
+  var $focusables = panelFocusableElements(selector);
+  if ($focusables.length) {
+    $focusables.first().trigger('focus').trigger('click');
+    return true;
+  }
+  return false;
+}
+function handleFrontPanelBack() {
+  var selector = getActiveFrontPanel();
+  if (!selector) {
+    return false;
+  }
+  if (selector === '#save-panel' && !$('#save-panel-back').hasClass('hidden')) {
+    $('#save-panel-back').trigger('click');
+    return true;
+  }
+  var $close = $(selector).find('.search-header button').filter(':visible').last();
+  if ($close.length) {
+    $close.trigger('click');
+    return true;
+  }
+  return false;
+}
 function idbRead(dbName, storeName, reader) {
   return new Promise(function(resolve) {
     if (!window.indexedDB) {
@@ -210,6 +319,47 @@ function idbRead(dbName, storeName, reader) {
       } catch(e) {
         db.close();
         resolve();
+      }
+    };
+  });
+}
+function idbWrite(dbName, storeName, writer) {
+  return new Promise(function(resolve) {
+    if (!window.indexedDB) {
+      resolve(false);
+      return;
+    }
+    var request = indexedDB.open(dbName);
+    request.onerror = function() {
+      resolve(false);
+    };
+    request.onsuccess = function() {
+      var db = request.result;
+      if (!db.objectStoreNames.contains(storeName)) {
+        db.close();
+        resolve(false);
+        return;
+      }
+      try {
+        var tx = db.transaction(storeName, 'readwrite');
+        var store = tx.objectStore(storeName);
+        var writeRequest = writer(store);
+        if (writeRequest && typeof writeRequest.onerror !== 'undefined') {
+          writeRequest.onerror = function() {
+            resolve(false);
+          };
+        }
+        tx.oncomplete = function() {
+          db.close();
+          resolve(true);
+        };
+        tx.onerror = function() {
+          db.close();
+          resolve(false);
+        };
+      } catch (e) {
+        db.close();
+        resolve(false);
       }
     };
   });
@@ -371,6 +521,50 @@ function bytesFromSaveValue(value) {
     return value.data;
   }
   return value;
+}
+function restoreTargetForSave(save) {
+  if (!save) {
+    return null;
+  }
+  if ((save.type || '').indexOf('State') !== -1) {
+    return {
+      dbName: 'EmulatorJS-states',
+      storeName: 'states',
+      key: save.name
+    };
+  }
+  return {
+    dbName: 'FILE_DATA',
+    storeName: 'FILE_DATA',
+    key: '/data/saves/' + save.name
+  };
+}
+async function restoreSaveForLaunch(saveId) {
+  var save = findSaveById(saveId);
+  if (!save) {
+    await getSaveInventory(true);
+    save = findSaveById(saveId);
+  }
+  if (!save) {
+    return false;
+  }
+  var bytes = await save.load();
+  if (!bytes) {
+    return false;
+  }
+  var target = restoreTargetForSave(save);
+  if (!target || !target.key) {
+    return false;
+  }
+  var payload = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  var restored = await idbWrite(target.dbName, target.storeName, function(store) {
+    return store.put(payload, target.key);
+  });
+  if (!restored) {
+    return false;
+  }
+  await getSaveInventory(true);
+  return true;
 }
 function saveByteLength(value) {
   var bytes = bytesFromSaveValue(value);
@@ -680,7 +874,8 @@ function groupSaveVariants(saves) {
   });
   return grouped;
 }
-function renderSaveVersionRows(target, saves) {
+function renderSaveVersionRows(target, saves, options) {
+  options = options || {};
   $(target).empty();
   for (var save of saves) {
     var row = $('<div>').addClass('save-file-row');
@@ -688,13 +883,21 @@ function renderSaveVersionRows(target, saves) {
     detail.append($('<span>').addClass('save-file-title').text(save.name));
     detail.append($('<span>').addClass('save-file-meta').text(saveVersionSummary(save)));
     detail.on('click', function(saveId) {
-      return function() {
+      return async function() {
+        if (options.mode === 'launch' && typeof options.onSelect === 'function') {
+          await options.onSelect(saveId);
+          return;
+        }
         downloadSaveFile(saveId);
       };
     }(save.id));
-    var download = $('<button>').attr('type', 'button').text('Download');
+    var download = $('<button>').attr('type', 'button').text(options.mode === 'launch' ? 'Use Save' : 'Download');
     download.on('click', function(saveId) {
-      return function() {
+      return async function() {
+        if (options.mode === 'launch' && typeof options.onSelect === 'function') {
+          await options.onSelect(saveId);
+          return;
+        }
         downloadSaveFile(saveId);
       };
     }(save.id));
@@ -702,20 +905,30 @@ function renderSaveVersionRows(target, saves) {
     $(target).append(row);
   }
 }
-function openSaveVersionPicker(group, backHandler) {
+function openSaveVersionPicker(group, backHandler, options) {
+  options = options || {};
   setSavePanelBack(backHandler);
   $('#save-panel').removeClass('hidden');
-  $('#save-panel-title').text(safeDecodeDisplayName(group.name) + ' Versions');
-  $('#save-panel-status').text(group.versions.length + ' version' + (group.versions.length === 1 ? '' : 's') + ' available');
+  $('#save-panel-title').text(safeDecodeDisplayName((options.titlePrefix || group.name) + (options.mode === 'launch' ? '' : ' Versions')));
+  $('#save-panel-status').text(options.statusText || (group.versions.length + ' version' + (group.versions.length === 1 ? '' : 's') + ' available'));
   $('#save-panel-results').empty();
-  if (group.versions.length > 1) {
+  if (options.mode === 'launch') {
+    var withoutButton = $('<button>').attr('type', 'button').text('Launch Without Restoring');
+    withoutButton.on('click', function() {
+      if (typeof options.onSkip === 'function') {
+        options.onSkip();
+      }
+    });
+    $('#save-panel-results').append(withoutButton);
+  } else if (group.versions.length > 1) {
     var allButton = $('<button>').attr('type', 'button').text('Download All Versions');
     allButton.on('click', function() {
       downloadSaveList(group.versions.map(function(save) { return save.id; }), saveBasename(group.name) + '-versions.zip');
     });
     $('#save-panel-results').append(allButton);
   }
-  renderSaveVersionRows('#save-panel-results', group.versions);
+  renderSaveVersionRows('#save-panel-results', group.versions, options);
+  focusFrontPanel('#save-panel', '.search-result, button');
 }
 async function downloadSaveList(saveIds, fileName) {
   var zip = new JSZip();
@@ -748,7 +961,8 @@ async function downloadAllSaves() {
   }
   await downloadSaveList(saves.map(function(save) { return save.id; }), 'emulatorjs-saves.zip');
 }
-function renderSaveRows(target, saves, emptyMessage, backHandler) {
+function renderSaveRows(target, saves, emptyMessage, backHandler, options) {
+  options = options || {};
   $(target).empty();
   if (saves.length === 0) {
     $(target).append($('<div>').addClass('search-status').text(emptyMessage || 'No saves found.'));
@@ -762,13 +976,13 @@ function renderSaveRows(target, saves, emptyMessage, backHandler) {
     detail.append($('<span>').addClass('save-file-meta').text(groupedSaveSummary(group)));
     detail.on('click', function(saveGroup) {
       return function() {
-        openSaveVersionPicker(saveGroup, backHandler);
+        openSaveVersionPicker(saveGroup, backHandler, options);
       };
     }(group));
-    var download = $('<button>').attr('type', 'button').text(group.versions.length > 1 ? 'Versions' : 'Download');
+    var download = $('<button>').attr('type', 'button').text(options.mode === 'launch' ? (group.versions.length > 1 ? 'Choose Save' : 'Use Save') : (group.versions.length > 1 ? 'Versions' : 'Download'));
     download.on('click', function(saveGroup) {
       return function() {
-        openSaveVersionPicker(saveGroup, backHandler);
+        openSaveVersionPicker(saveGroup, backHandler, options);
       };
     }(group));
     row.append(detail, download);
@@ -778,13 +992,24 @@ function renderSaveRows(target, saves, emptyMessage, backHandler) {
 function closeSavePanel() {
   setSavePanelBack(null);
   $('#save-panel').addClass('hidden');
+  clearFrontPanelFocus('#save-panel');
 }
 function closeVariantPanel() {
   variantPanelState = null;
   $('#variant-panel').addClass('hidden');
+  clearFrontPanelFocus('#variant-panel');
 }
 function closeInfoPanel() {
   $('#info-panel').addClass('hidden');
+}
+function variantCodeSummary(variant) {
+  var lines = [];
+  (variant.codeTooltips || []).forEach(function(item) {
+    if (item && item.description && lines.indexOf(item.description) === -1) {
+      lines.push(repairDisplayText(item.description));
+    }
+  });
+  return lines.join(' | ');
 }
 function variantSummary(variant) {
   var bits = [];
@@ -873,6 +1098,10 @@ function renderVariantPanel() {
     }
     button.append($('<span>').addClass('variant-launch-title').text(safeDecodeDisplayName(variant.name)));
     button.append($('<span>').addClass('variant-launch-meta').text(variantSummary(variant)));
+    var codeSummary = variantCodeSummary(variant);
+    if (codeSummary) {
+      button.append($('<span>').addClass('variant-launch-notes').text(codeSummary));
+    }
     var actions = $('<div>').addClass('variant-actions');
     var downloadButton = $('<button>')
       .addClass('panel-icon-button')
@@ -933,6 +1162,71 @@ function openVariantPanel(entry, options) {
     mode: options && options.mode || 'launch'
   };
   renderVariantPanel();
+  focusFrontPanel('#variant-panel', '.variant-launch, .panel-icon-button');
+}
+function cloneLaunchButton(button) {
+  var source = button && button.jquery ? button.get(0) : button;
+  var temp = $('<button type="button">');
+  if (source && source.attributes) {
+    Array.prototype.forEach.call(source.attributes, function(attr) {
+      temp.attr(attr.name, attr.value);
+    });
+  }
+  temp.attr('data-save-selection-ready', 'true');
+  return temp;
+}
+async function openLaunchSavePickerForButton(button) {
+  var selected = button && button.jquery ? button : $(button);
+  var gameLabel = selected.attr('data-group-display-name') || selected.attr('data-display-name') || selected.attr('data-name') || 'Game';
+  var gameBase = saveBasename((selected.attr('data-name') || gameLabel) + (selected.attr('data-rom_extension') || ''));
+  var saves = (await getSaveInventory(true)).filter(function(save) {
+    return saveRecordMatchesGame(save, gameBase);
+  });
+  if (!saves.length) {
+    var directLaunch = cloneLaunchButton(selected);
+    launch(directLaunch);
+    return;
+  }
+  pendingLaunchSelection = {
+    button: cloneLaunchButton(selected),
+    gameName: gameLabel,
+    gameBase: gameBase
+  };
+  closeSearchPanel();
+  closeFavoritesPanel();
+  closeLoginPanel();
+  closeVariantPanel();
+  $('#save-panel-title').text('Launch ' + safeDecodeDisplayName(gameLabel));
+  $('#save-panel-status').text('Choose which save version to restore before launch.');
+  $('#save-panel-results').empty();
+  $('#save-panel').removeClass('hidden');
+  setSavePanelBack(null);
+  renderSaveRows('#save-panel-results', saves, 'No matching saves found for this game yet.', null, {
+    mode: 'launch',
+    titlePrefix: gameLabel,
+    statusText: 'Choose which save version to restore before launch.',
+    onSelect: async function(saveId) {
+      $('#save-panel-status').text('Restoring save...');
+      var restored = await restoreSaveForLaunch(saveId);
+      if (!restored) {
+        $('#save-panel-status').text('Unable to restore that save.');
+        return;
+      }
+      closeSavePanel();
+      if (pendingLaunchSelection && pendingLaunchSelection.button) {
+        launch(pendingLaunchSelection.button);
+      }
+      pendingLaunchSelection = null;
+    },
+    onSkip: function() {
+      closeSavePanel();
+      if (pendingLaunchSelection && pendingLaunchSelection.button) {
+        launch(pendingLaunchSelection.button);
+      }
+      pendingLaunchSelection = null;
+    }
+  });
+  focusFrontPanel('#save-panel', '.search-result, button');
 }
 async function openGameSaves(event, gameName, gameBase) {
   if (event) {
@@ -963,6 +1257,7 @@ async function openGameSaves(event, gameName, gameBase) {
     });
     $('#save-panel-results').prepend(allButton);
   }
+  focusFrontPanel('#save-panel', '.search-result, button');
 }
 async function renderProfileSaves() {
   $('#profile-saves-status').text('Scanning local saves...');
@@ -1078,6 +1373,9 @@ function updateLoginState() {
       $('#background').attr('src', '');
       $('#corner').attr('src', '');
       $('#console-list-tools').addClass('hidden');
+      focusFrontPanel('#login-panel', '#profile-user, button');
+    } else {
+      clearFrontPanelFocus('#login-panel');
     }
   }
 }
@@ -1088,12 +1386,14 @@ function openLoginPanel() {
   closeVariantPanel();
   $('#login-panel').removeClass('hidden');
   updateLoginState();
+  focusFrontPanel('#login-panel', '#profile-user, button');
 }
 function closeLoginPanel() {
   if (requireMainLogin && !localStorage.getItem('user')) {
     return;
   }
   $('#login-panel').addClass('hidden');
+  clearFrontPanelFocus('#login-panel');
 }
 async function profileLogin() {
   var user = $('#profile-user').val();
@@ -1515,6 +1815,7 @@ function openSearchPanel() {
   closeVariantPanel();
   closeInfoPanel();
   $('#search-panel').removeClass('hidden');
+  focusFrontPanel('#search-panel', '#game-search');
   ensureSearchCatalog().then(function() {
     runGameSearch();
   });
@@ -1524,9 +1825,11 @@ function openSearchPanel() {
 }
 function closeSearchPanel() {
   $('#search-panel').addClass('hidden');
+  clearFrontPanelFocus('#search-panel');
 }
 function closeFavoritesPanel() {
   $('#favorites-panel').addClass('hidden');
+  clearFrontPanelFocus('#favorites-panel');
 }
 function toggleAdvancedSearch() {
   $('#advanced-search').toggleClass('hidden');
@@ -1548,6 +1851,7 @@ function showFavorites() {
   $('#favorites-results').empty();
   ensureSearchCatalog().then(function() {
     renderFavoritesPanel();
+    focusFrontPanel('#favorites-panel', '.search-result, .panel-icon-button, button');
   });
 }
 function renderFavoritesPanel() {
@@ -1585,6 +1889,9 @@ function renderFavoritesPanel() {
     actions.append(removeButton);
     row.append(openButton, actions);
     $('#favorites-results').append(row);
+  }
+  if (getActiveFrontPanel() === '#favorites-panel') {
+    focusFrontPanel('#favorites-panel', '.search-result, .panel-icon-button, button');
   }
 }
 function resolveItem(item, defaults) {
@@ -2205,6 +2512,10 @@ function launch(active_item) {
   if (selected.data('close-variant-panel') === true) {
     closeVariantPanel();
   }
+  if (type == 'game' && selected.data('save-selection-ready') !== true) {
+    openLaunchSavePickerForButton(selected);
+    return;
+  }
   $(document).attr('title', displayName);
   if (type == 'menu') {
     window.location.href = '#' + name
@@ -2750,6 +3061,32 @@ async function rendermenu(datas) {
   let upPressed = false;
   let downPressed = false;
   $(document).keydown(function(event) {
+    var activePanel = getActiveFrontPanel();
+    if (activePanel && $(event.target).is('input, select, textarea')) {
+      return;
+    }
+    if (activePanel) {
+      if (event.key == 'ArrowDown') {
+        event.preventDefault();
+        moveFrontPanelFocus(1);
+        return;
+      }
+      if (event.key == 'ArrowUp') {
+        event.preventDefault();
+        moveFrontPanelFocus(-1);
+        return;
+      }
+      if (event.key == 'ArrowRight' || event.key == 'Enter') {
+        event.preventDefault();
+        activateFrontPanelControl();
+        return;
+      }
+      if (event.key == 'ArrowLeft' || event.key == 'Escape') {
+        event.preventDefault();
+        handleFrontPanelBack();
+        return;
+      }
+    }
     if ($(event.target).is('input, select, textarea')) {
       return;
     }
@@ -2874,6 +3211,44 @@ async function rendermenu(datas) {
     let gp = gamePads[0];
     if (window.location.hash != "#game") {
       gameStarted = false;
+      var activePanel = getActiveFrontPanel();
+      if (activePanel) {
+        if (!scrollDelay) {
+          if ((buttonsMissing([1,3],[])) && (gp.axes[1] > .5 || gp.axes[3] > .5)) {
+            scrollDelay = setTimeout(() => scrollDelay = undefined, 180);
+            moveFrontPanelFocus(1);
+          } else if ((buttonsMissing([1,3],[])) && (gp.axes[1] < -.5 || gp.axes[3] < -.5)) {
+            scrollDelay = setTimeout(() => scrollDelay = undefined, 180);
+            moveFrontPanelFocus(-1);
+          } else if ((buttonsMissing([],[13])) && (gp.buttons[13].pressed)) {
+            scrollDelay = setTimeout(() => scrollDelay = undefined, 180);
+            moveFrontPanelFocus(1);
+          } else if ((buttonsMissing([],[12])) && (gp.buttons[12].pressed)) {
+            scrollDelay = setTimeout(() => scrollDelay = undefined, 180);
+            moveFrontPanelFocus(-1);
+          } else if ((buttonsMissing([],[15])) && (gp.buttons[15].pressed)) {
+            scrollDelay = setTimeout(() => scrollDelay = undefined, 180);
+            activateFrontPanelControl();
+          } else if ((buttonsMissing([],[14])) && (gp.buttons[14].pressed)) {
+            scrollDelay = setTimeout(() => scrollDelay = undefined, 180);
+            handleFrontPanelBack();
+          }
+        }
+        if (gp.timestamp == gpUpdate) {
+          animReq = requestAnimationFrame(gameLoop);
+          return;
+        }
+        gpUpdate = gp.timestamp;
+        if (gp.buttons[0].pressed) {
+          activateFrontPanelControl();
+          return;
+        } else if (gp.buttons[1].pressed) {
+          handleFrontPanelBack();
+          return;
+        }
+        animReq = requestAnimationFrame(gameLoop);
+        return;
+      }
       if (!scrollDelay) {
         // Analog down
         if ((buttonsMissing([1,3],[])) && (gp.axes[1] > .5 || gp.axes[3] > .5)) {

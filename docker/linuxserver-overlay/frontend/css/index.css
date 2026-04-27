@@ -334,6 +334,15 @@ body.profile-required .login-panel {
   font-size: 13px;
 }
 
+.variant-launch-notes {
+  display: block;
+  margin-top: 4px;
+  color: rgba(255, 255, 255, .56);
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
 .variant-favorite,
 .favorite-indicator,
 .panel-icon-button {
@@ -368,6 +377,14 @@ body.profile-required .login-panel {
 
 .panel-icon-button {
   font-size: 17px;
+}
+
+.search-panel.is-active-panel,
+.favorites-panel.is-active-panel,
+.save-panel.is-active-panel,
+.variant-panel.is-active-panel,
+.login-panel.is-active-panel {
+  box-shadow: 0 0 0 1px rgba(106, 222, 255, .4), 0 22px 48px rgba(0, 0, 0, .5);
 }
 
 body.profile-required .login-panel {

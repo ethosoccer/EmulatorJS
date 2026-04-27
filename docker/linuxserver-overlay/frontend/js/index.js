@@ -539,6 +539,40 @@ function restoreTargetForSave(save) {
     key: '/data/saves/' + save.name
   };
 }
+function restoreProfilePathForSave(save) {
+  if (!save) {
+    return null;
+  }
+  var relativePath = save.pathKey || save.key || '';
+  if (!relativePath) {
+    return null;
+  }
+  relativePath = String(relativePath).replace(/^\/+/, '');
+  if (isHistoryProfileSavePath(relativePath)) {
+    relativePath = historyRelativeSavePath(relativePath);
+  }
+  if (!isProfileSavePath(relativePath)) {
+    return null;
+  }
+  return relativePath;
+}
+async function restoreProfileSaveForLaunch(save, bytes) {
+  var relativePath = restoreProfilePathForSave(save);
+  if (!relativePath) {
+    return false;
+  }
+  try {
+    await setupProfileFs();
+    if (!profileFs) {
+      return false;
+    }
+    await writeProfileFileWithBackup(relativePath, Buffer.from(bytes), 'launch-restore-' + Date.now());
+    return true;
+  } catch(e) {
+    console.log('Unable to restore save into profile filesystem', e);
+    return false;
+  }
+}
 async function restoreSaveForLaunch(saveId) {
   var save = findSaveById(saveId);
   if (!save) {
@@ -552,15 +586,21 @@ async function restoreSaveForLaunch(saveId) {
   if (!bytes) {
     return false;
   }
+  var payload = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
   var target = restoreTargetForSave(save);
   if (!target || !target.key) {
-    return false;
+    var profileOnlyRestored = await restoreProfileSaveForLaunch(save, payload);
+    if (!profileOnlyRestored) {
+      return false;
+    }
+    await getSaveInventory(true);
+    return true;
   }
-  var payload = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
-  var restored = await idbWrite(target.dbName, target.storeName, function(store) {
+  var restoredToProfile = await restoreProfileSaveForLaunch(save, payload);
+  var restoredToBrowser = await idbWrite(target.dbName, target.storeName, function(store) {
     return store.put(payload, target.key);
   });
-  if (!restored) {
+  if (!restoredToProfile && !restoredToBrowser) {
     return false;
   }
   await getSaveInventory(true);

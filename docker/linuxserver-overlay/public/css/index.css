@@ -716,7 +716,7 @@ button:focus-visible {
 #modal {
   display: none;
   position: fixed;
-  z-index: 10;
+  z-index: 100000;
   inset: 0;
   margin: auto;
   width: min(1100px, calc(100vw - 32px));
@@ -731,6 +731,14 @@ button:focus-visible {
   border-radius: 8px;
   background: var(--panel);
   box-shadow: var(--shadow);
+}
+
+body.modal-open {
+  overflow: hidden;
+}
+
+.scan-inline-launcher {
+  margin-bottom: 18px;
 }
 
 #modal::before {

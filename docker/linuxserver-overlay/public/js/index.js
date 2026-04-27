@@ -366,8 +366,20 @@ function renderLogsView() {
 
 function renderScansView() {
   $('#main').data('view', 'scans');
+  clearInlineScanLauncher();
   renderScansPage(scanJobsState);
   socket.emit('renderscans');
+}
+
+function clearInlineScanLauncher() {
+  $('#scan-inline-launcher').remove();
+}
+
+function showInlineScanLauncher(card) {
+  clearInlineScanLauncher();
+  var wrapper = $('<div>').attr('id', 'scan-inline-launcher').addClass('card logs-card scan-inline-launcher');
+  wrapper.append(card);
+  $('#main').prepend(wrapper);
 }
 
 function getScanJob(scanId) {
@@ -456,6 +468,10 @@ function openScanLauncher(config) {
   card.append(actions);
   $('#modal-content').append(card);
   showModal();
+  clearInlineScanLauncher();
+  if ($('#modal').css('display') === 'none') {
+    showInlineScanLauncher(card.clone(true, true));
+  }
 }
 
 function startScanJob(mode) {
@@ -469,6 +485,9 @@ function startScanJob(mode) {
     preferredRegion: scanLauncherConfig.preferredRegion || ''
   };
   $('#modal-content').empty().append($('<div>').addClass('loader'));
+  if ($('#scan-inline-launcher').length) {
+    $('#scan-inline-launcher').empty().append($('<div>').addClass('loader'));
+  }
   socket.emit('startscanjob', payload);
 }
 
@@ -505,6 +524,10 @@ function renderScanJobModal(job) {
   card.append($('<pre>').addClass('scan-job-log').text((job.logs || []).join('\n') || 'No output yet.'));
   $('#modal-content').append(card);
   showModal();
+  clearInlineScanLauncher();
+  if ($('#modal').css('display') === 'none') {
+    showInlineScanLauncher(card.clone(true, true));
+  }
 }
 
 function openScanJobModal(scanId) {
@@ -673,13 +696,16 @@ function emptyModal() {
 }
 
 function showModal() {
-  $('#modal').stop(true, true).css('display', 'block');
+  $('body').addClass('modal-open');
+  $('#modal').stop(true, true).css({'display': 'block', 'z-index': 100000});
 }
 
 // Close modal
 function closeModal() {
   scanLauncherConfig = null;
   emptyModal();
+  clearInlineScanLauncher();
+  $('body').removeClass('modal-open');
   $('#modal').hide()
 }
 

@@ -36,6 +36,8 @@ var savePanelBackHandler = null;
 var variantPanelState = null;
 var pendingLaunchSelection = null;
 var activeFrontPanelSelector = null;
+var frontPanelNavState = {selector: null, row: 0, col: 0};
+var menuActionIndex = 0;
 var requireMainLogin = false;
 var isSafari = navigator.vendor && navigator.vendor.indexOf('Apple') > -1 &&
                navigator.userAgent &&
@@ -252,6 +254,140 @@ function clickDomElement($element) {
   }
   return false;
 }
+function clearControllerSelectionClasses() {
+  $('.controller-selected').removeClass('controller-selected');
+}
+function panelRowControls($row) {
+  return $row.find('.search-result, .variant-launch, .panel-icon-button, .variant-favorite, .favorite-indicator, button')
+    .filter(':visible');
+}
+function panelNavigationRows(selector) {
+  if (!selector) {
+    return [];
+  }
+  var $panel = $(selector);
+  var rows = [];
+  $panel.children('button:visible').each(function() {
+    rows.push($(this));
+  });
+  $panel.find('.variant-result-row:visible, .save-file-row:visible, .favorite-result-row:visible').each(function() {
+    var controls = panelRowControls($(this));
+    if (controls.length) {
+      rows.push(controls);
+    }
+  });
+  if (!rows.length) {
+    panelFocusableElements(selector).each(function() {
+      rows.push($(this));
+    });
+  }
+  return rows;
+}
+function syncFrontPanelNavigation(selector, options) {
+  options = options || {};
+  if (!selector || $(selector).hasClass('hidden')) {
+    frontPanelNavState = {selector: null, row: 0, col: 0};
+    clearControllerSelectionClasses();
+    return false;
+  }
+  var rows = panelNavigationRows(selector);
+  if (!rows.length) {
+    frontPanelNavState = {selector: selector, row: 0, col: 0};
+    clearControllerSelectionClasses();
+    focusDomElement($(selector), $(selector));
+    return true;
+  }
+  if (frontPanelNavState.selector !== selector || !options.preserve) {
+    frontPanelNavState = {selector: selector, row: 0, col: 0};
+  }
+  frontPanelNavState.selector = selector;
+  frontPanelNavState.row = Math.max(0, Math.min(frontPanelNavState.row, rows.length - 1));
+  var selectedRow = rows[frontPanelNavState.row];
+  var rowControls = selectedRow && selectedRow.jquery ? selectedRow : $(selectedRow);
+  frontPanelNavState.col = Math.max(0, Math.min(frontPanelNavState.col, rowControls.length - 1));
+  clearControllerSelectionClasses();
+  var $target = rowControls.eq(frontPanelNavState.col);
+  $target.addClass('controller-selected');
+  focusDomElement($target, $(selector));
+  return true;
+}
+function moveFrontPanelHorizontal(delta) {
+  var selector = getActiveFrontPanel();
+  if (!selector) {
+    return false;
+  }
+  var rows = panelNavigationRows(selector);
+  if (!rows.length) {
+    return false;
+  }
+  if (frontPanelNavState.selector !== selector) {
+    syncFrontPanelNavigation(selector);
+    return true;
+  }
+  var rowControls = rows[frontPanelNavState.row] && rows[frontPanelNavState.row].jquery ? rows[frontPanelNavState.row] : $(rows[frontPanelNavState.row]);
+  if (!rowControls.length) {
+    return false;
+  }
+  frontPanelNavState.col = (frontPanelNavState.col + delta + rowControls.length) % rowControls.length;
+  return syncFrontPanelNavigation(selector, {preserve: true});
+}
+function activateCurrentFrontPanelControl() {
+  var selector = getActiveFrontPanel();
+  if (!selector) {
+    return false;
+  }
+  if (frontPanelNavState.selector !== selector) {
+    syncFrontPanelNavigation(selector);
+  }
+  var rows = panelNavigationRows(selector);
+  if (!rows.length) {
+    return false;
+  }
+  var rowControls = rows[frontPanelNavState.row] && rows[frontPanelNavState.row].jquery ? rows[frontPanelNavState.row] : $(rows[frontPanelNavState.row]);
+  var $target = rowControls.eq(frontPanelNavState.col);
+  if (!$target.length) {
+    return false;
+  }
+  focusDomElement($target, $(selector));
+  return clickDomElement($target);
+}
+function getMenuRowControls(index) {
+  var $row = $('#h' + index);
+  if (!$row.length) {
+    return $();
+  }
+  return $row.find('a, .save-toggle:not(.hidden), .rom-download-toggle, .favorite-toggle').filter(':visible');
+}
+function syncMenuControllerSelection() {
+  clearControllerSelectionClasses();
+  var $controls = getMenuRowControls(active_item);
+  if (!$controls.length) {
+    return false;
+  }
+  menuActionIndex = Math.max(0, Math.min(menuActionIndex, $controls.length - 1));
+  var $target = $controls.eq(menuActionIndex);
+  $target.addClass('controller-selected');
+  focusDomElement($target, $('#h' + active_item));
+  return true;
+}
+function moveMenuHorizontal(delta) {
+  var $controls = getMenuRowControls(active_item);
+  if (!$controls.length) {
+    return false;
+  }
+  menuActionIndex = (menuActionIndex + delta + $controls.length) % $controls.length;
+  return syncMenuControllerSelection();
+}
+function activateCurrentMenuControl() {
+  var $controls = getMenuRowControls(active_item);
+  if (!$controls.length) {
+    return false;
+  }
+  menuActionIndex = Math.max(0, Math.min(menuActionIndex, $controls.length - 1));
+  var $target = $controls.eq(menuActionIndex);
+  focusDomElement($target, $('#h' + active_item));
+  return clickDomElement($target);
+}
 function focusFrontPanel(selector, preferredSelector) {
   if (!selector || $(selector).hasClass('hidden')) {
     return;
@@ -265,51 +401,39 @@ function focusFrontPanel(selector, preferredSelector) {
   var $target = $preferred.length ? $preferred : ($focusables.length ? $focusables.first() : $panel);
   setTimeout(function() {
     focusDomElement($target, $panel);
+    syncFrontPanelNavigation(selector, {preserve: false});
   }, 0);
 }
 function clearFrontPanelFocus(selector) {
   if (!selector || activeFrontPanelSelector === selector) {
     activeFrontPanelSelector = null;
   }
+  if (!selector || frontPanelNavState.selector === selector) {
+    frontPanelNavState = {selector: null, row: 0, col: 0};
+  }
   syncFrontPanelState();
+  clearControllerSelectionClasses();
 }
 function moveFrontPanelFocus(delta) {
   var selector = getActiveFrontPanel();
   if (!selector) {
     return false;
   }
-  var $focusables = panelFocusableElements(selector);
-  if (!$focusables.length) {
+  var rows = panelNavigationRows(selector);
+  if (!rows.length) {
     focusFrontPanel(selector);
     return true;
   }
-  var current = document.activeElement;
-  var currentIndex = $focusables.toArray().indexOf(current);
-  if (currentIndex < 0) {
-    currentIndex = delta > 0 ? -1 : 0;
+  if (frontPanelNavState.selector !== selector) {
+    syncFrontPanelNavigation(selector);
   }
-  var nextIndex = (currentIndex + delta + $focusables.length) % $focusables.length;
-  focusDomElement($focusables.eq(nextIndex), $(selector));
-  return true;
+  frontPanelNavState.row = (frontPanelNavState.row + delta + rows.length) % rows.length;
+  var rowControls = rows[frontPanelNavState.row] && rows[frontPanelNavState.row].jquery ? rows[frontPanelNavState.row] : $(rows[frontPanelNavState.row]);
+  frontPanelNavState.col = Math.max(0, Math.min(frontPanelNavState.col, rowControls.length - 1));
+  return syncFrontPanelNavigation(selector, {preserve: true});
 }
 function activateFrontPanelControl() {
-  var selector = getActiveFrontPanel();
-  if (!selector) {
-    return false;
-  }
-  var current = document.activeElement;
-  if (current && $(current).closest(selector).length) {
-    if (clickDomElement($(current))) {
-      return true;
-    }
-  }
-  var $focusables = panelFocusableElements(selector);
-  if ($focusables.length) {
-    var $first = $focusables.first();
-    focusDomElement($first, $(selector));
-    return clickDomElement($first);
-  }
-  return false;
+  return activateCurrentFrontPanelControl();
 }
 function handleFrontPanelBack() {
   var selector = getActiveFrontPanel();
@@ -3201,6 +3325,7 @@ async function rendermenu(datas) {
     } else {
       $('#h' + active_item).addClass('grow-mobile')
     };
+    syncMenuControllerSelection();
   }
   // Set page title
   $(document).attr('title', data.title);
@@ -3317,6 +3442,7 @@ async function rendermenu(datas) {
     } else {
       $('.menu-img').css({'max-width': '90vw'});
     }
+    syncMenuControllerSelection();
   }
   function renderMenuItems(nextActiveItem) {
     var showFilter = root !== 'main' && !(data.hasOwnProperty('multi_name') && hasUsableValue(data.multi_name));
@@ -3334,6 +3460,8 @@ async function rendermenu(datas) {
     renderConsoleFilterState(allEntries.length, filteredEntries.length, query);
     if (filteredEntries.length === 0) {
       active_item = 0;
+      menuActionIndex = 0;
+      clearControllerSelectionClasses();
       $('#active-list').append('<div class="console-empty">No games match "' + escapeHtml($('#console-list-search').val() || '') + '".</div>');
       $('#vid').attr('src', '');
       $('#bgvid').trigger('load');
@@ -3480,12 +3608,22 @@ async function rendermenu(datas) {
         moveFrontPanelFocus(-1);
         return;
       }
-      if (event.key == 'ArrowRight' || event.key == 'Enter') {
+      if (event.key == 'ArrowRight') {
+        event.preventDefault();
+        moveFrontPanelHorizontal(1);
+        return;
+      }
+      if (event.key == 'ArrowLeft') {
+        event.preventDefault();
+        moveFrontPanelHorizontal(-1);
+        return;
+      }
+      if (event.key == 'Enter') {
         event.preventDefault();
         activateFrontPanelControl();
         return;
       }
-      if (event.key == 'ArrowLeft' || event.key == 'Escape') {
+      if (event.key == 'Escape') {
         event.preventDefault();
         handleFrontPanelBack();
         return;
@@ -3510,12 +3648,20 @@ async function rendermenu(datas) {
     if ((event.key == 'ArrowRight') && ((upPressed == true) && (downPressed == false))) {
       moveUp(10);
     }
+    if ((event.key == 'ArrowRight') && ((upPressed == false) && (downPressed == false))) {
+      moveMenuHorizontal(1);
+      return;
+    }
+    if ((event.key == 'ArrowLeft') && ((upPressed == false) && (downPressed == false))) {
+      moveMenuHorizontal(-1);
+      return;
+    }
     // Load item
-    if (((event.key == 'ArrowRight') || (event.key == 'Enter')) && ((upPressed == false) && (downPressed == false))) {
-      $('#i' + active_item).click();
+    if ((event.key == 'Enter') && ((upPressed == false) && (downPressed == false))) {
+      activateCurrentMenuControl();
     }
     // Go to Parent
-    if (event.key == 'ArrowLeft') {
+    if (event.key == 'Escape' || event.key == 'Backspace') {
       window.location.href = '#' + parent;
     }
     // Jump Down
@@ -3652,6 +3798,12 @@ async function rendermenu(datas) {
           } else if ((buttonsMissing([1,3],[])) && (gp.axes[1] < -.5 || gp.axes[3] < -.5)) {
             scrollDelay = setTimeout(() => scrollDelay = undefined, 180);
             moveFrontPanelFocus(-1);
+          } else if ((buttonsMissing([0,2],[])) && (gp.axes[0] > .5 || gp.axes[2] > .5)) {
+            scrollDelay = setTimeout(() => scrollDelay = undefined, 180);
+            moveFrontPanelHorizontal(1);
+          } else if ((buttonsMissing([0,2],[])) && (gp.axes[0] < -.5 || gp.axes[2] < -.5)) {
+            scrollDelay = setTimeout(() => scrollDelay = undefined, 180);
+            moveFrontPanelHorizontal(-1);
           } else if ((buttonsMissing([],[13])) && (gp.buttons[13].pressed)) {
             scrollDelay = setTimeout(() => scrollDelay = undefined, 180);
             moveFrontPanelFocus(1);
@@ -3660,10 +3812,10 @@ async function rendermenu(datas) {
             moveFrontPanelFocus(-1);
           } else if ((buttonsMissing([],[15])) && (gp.buttons[15].pressed)) {
             scrollDelay = setTimeout(() => scrollDelay = undefined, 180);
-            activateFrontPanelControl();
+            moveFrontPanelHorizontal(1);
           } else if ((buttonsMissing([],[14])) && (gp.buttons[14].pressed)) {
             scrollDelay = setTimeout(() => scrollDelay = undefined, 180);
-            handleFrontPanelBack();
+            moveFrontPanelHorizontal(-1);
           }
         }
         if (gp.timestamp == gpUpdate) {
@@ -3724,6 +3876,18 @@ async function rendermenu(datas) {
             scrollDelay = setTimeout(() => scrollDelay = undefined, 40);
           }
           moveDown();
+        } else if ((buttonsMissing([0,2],[])) && (gp.axes[0] > .5 || gp.axes[2] > .5)) {
+          scrollDelay = setTimeout(() => scrollDelay = undefined, 180);
+          moveMenuHorizontal(1);
+        } else if ((buttonsMissing([0,2],[])) && (gp.axes[0] < -.5 || gp.axes[2] < -.5)) {
+          scrollDelay = setTimeout(() => scrollDelay = undefined, 180);
+          moveMenuHorizontal(-1);
+        } else if ((buttonsMissing([],[15])) && (gp.buttons[15].pressed)) {
+          scrollDelay = setTimeout(() => scrollDelay = undefined, 180);
+          moveMenuHorizontal(1);
+        } else if ((buttonsMissing([],[14])) && (gp.buttons[14].pressed)) {
+          scrollDelay = setTimeout(() => scrollDelay = undefined, 180);
+          moveMenuHorizontal(-1);
         }
       }
       if (gp.timestamp == gpUpdate) {
@@ -3735,7 +3899,7 @@ async function rendermenu(datas) {
         if ($('#i' + active_item.toString()).data('type') == "game") {
           cancelAnimationFrame(animReq);
         }
-        $('#i' + active_item).click();
+        activateCurrentMenuControl();
         return;
       } else if (gp.buttons[1].pressed && parent && '#' + parent != window.location.hash) {
         window.location.href = '#' + parent;

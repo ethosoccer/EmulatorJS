@@ -635,6 +635,204 @@ function saveTypeForPath(relativePath) {
   return 'In-game Save';
 }
 
+const SAVE_VERSION_ROOT = '.save-versions';
+
+function normalizeSaveRelativePath(relativePath) {
+  return String(relativePath || '').replace(/\\/g, '/').replace(/^\/+/, '');
+}
+
+function saveVersionStorageKey(relativePath) {
+  return Buffer.from(normalizeSaveRelativePath(relativePath), 'utf8').toString('hex');
+}
+
+function saveVersionDirRelative(relativePath) {
+  return path.posix.join(SAVE_VERSION_ROOT, saveVersionStorageKey(relativePath));
+}
+
+function saveVersionManifestRelative(relativePath) {
+  return path.posix.join(saveVersionDirRelative(relativePath), 'manifest.json');
+}
+
+function saveVersionBlobRelative(relativePath, versionId) {
+  return path.posix.join(saveVersionDirRelative(relativePath), 'versions', versionId + '.bin');
+}
+
+function saveContentHash(content) {
+  return crypto.createHash('sha256').update(content).digest('hex');
+}
+
+function saveManifestDefaults(relativePath) {
+  let normalizedPath = normalizeSaveRelativePath(relativePath);
+  let parts = normalizedPath.split('/');
+  let fileName = parts[parts.length - 1] || '';
+  let scope = parts[0] || '';
+  let core = parts[1] || '';
+  return {
+    saveKey: normalizedPath,
+    fileName: fileName,
+    displayName: safeDecodeName(fileName),
+    scope: scope,
+    core: core,
+    saveType: saveTypeForPath(normalizedPath),
+    createdAt: '',
+    updatedAt: '',
+    currentVersionId: '',
+    currentHash: '',
+    versions: []
+  };
+}
+
+async function readSaveManifest(profilePath, relativePath) {
+  let manifestPath = safeProfilePath(profilePath, saveVersionManifestRelative(relativePath));
+  try {
+    let raw = await fsw.readFile(manifestPath, 'utf8');
+    let parsed = JSON.parse(raw);
+    return Object.assign(saveManifestDefaults(relativePath), parsed || {}, {
+      versions: Array.isArray(parsed && parsed.versions) ? parsed.versions : []
+    });
+  } catch (e) {
+    return saveManifestDefaults(relativePath);
+  }
+}
+
+async function writeSaveManifest(profilePath, relativePath, manifest) {
+  let manifestPath = safeProfilePath(profilePath, saveVersionManifestRelative(relativePath));
+  await ensureDir(manifestPath);
+  await fsw.writeFile(manifestPath, JSON.stringify(manifest, null, 2));
+}
+
+function sortSaveVersionsNewestFirst(versions) {
+  return (versions || []).slice().sort(function(a, b) {
+    return Number(b.createdAtMs || 0) - Number(a.createdAtMs || 0);
+  });
+}
+
+async function ensureSaveVersioned(profilePath, relativePath, content, options) {
+  let normalizedPath = normalizeSaveRelativePath(relativePath);
+  if (!isSaveFile(normalizedPath)) {
+    return null;
+  }
+  let buffer = Buffer.isBuffer(content) ? content : Buffer.from(content);
+  let manifest = await readSaveManifest(profilePath, normalizedPath);
+  let now = new Date();
+  let nowIso = now.toISOString();
+  let nowMs = now.getTime();
+  let hash = saveContentHash(buffer);
+  let size = buffer.length;
+  let existingVersion = (manifest.versions || []).find(function(version) {
+    return version.hash === hash && Number(version.size || 0) === size;
+  });
+  let created = false;
+  if (!manifest.createdAt) {
+    manifest.createdAt = nowIso;
+  }
+  if (!existingVersion) {
+    created = true;
+    let versionId = timestampLabel() + '--' + hash.slice(0, 12);
+    let versionPath = safeProfilePath(profilePath, saveVersionBlobRelative(normalizedPath, versionId));
+    await ensureDir(versionPath);
+    await fsw.writeFile(versionPath, buffer);
+    existingVersion = {
+      id: versionId,
+      createdAt: nowIso,
+      createdAtMs: nowMs,
+      hash: hash,
+      size: size,
+      saveType: manifest.saveType,
+      scope: manifest.scope,
+      core: manifest.core,
+      fileName: manifest.fileName,
+      displayName: manifest.displayName,
+      source: options && options.source || 'Profile sync',
+      notes: options && options.notes || '',
+      pathKey: saveVersionBlobRelative(normalizedPath, versionId)
+    };
+    manifest.versions.push(existingVersion);
+  }
+  manifest.currentVersionId = existingVersion.id;
+  manifest.currentHash = hash;
+  manifest.updatedAt = nowIso;
+  manifest.versions = sortSaveVersionsNewestFirst(manifest.versions);
+  await writeSaveManifest(profilePath, normalizedPath, manifest);
+  return {
+    manifest: manifest,
+    version: existingVersion,
+    created: created,
+    hash: hash,
+    size: size
+  };
+}
+
+async function listSaveVersionRecords(profilePath) {
+  let records = [];
+  let manifestRoot = path.join(profilePath, SAVE_VERSION_ROOT);
+  if (!fs.existsSync(manifestRoot)) {
+    return records;
+  }
+  let manifestFiles = await collectFiles(manifestRoot, SAVE_VERSION_ROOT, []);
+  for await (let file of manifestFiles) {
+    if (!/manifest\.json$/i.test(file.relPath)) {
+      continue;
+    }
+    let manifestPath = safeProfilePath(profilePath, file.relPath);
+    let parsed;
+    try {
+      parsed = JSON.parse(await fsw.readFile(manifestPath, 'utf8'));
+    } catch (e) {
+      continue;
+    }
+    let manifest = Object.assign(saveManifestDefaults(parsed && parsed.saveKey || ''), parsed || {});
+    let versions = sortSaveVersionsNewestFirst(Array.isArray(manifest.versions) ? manifest.versions : []);
+    let currentVersionId = manifest.currentVersionId || '';
+    let currentVersion = versions.find(function(version) {
+      return version.id === currentVersionId;
+    }) || versions[0] || null;
+    if (currentVersion) {
+      records.push({
+        id: 'profile::current::' + manifest.saveKey,
+        pathKey: manifest.saveKey,
+        name: manifest.displayName || safeDecodeName(manifest.fileName || path.basename(manifest.saveKey || '')),
+        type: manifest.saveType || saveTypeForPath(manifest.saveKey),
+        source: 'Profile current',
+        versionLabel: 'Current',
+        versionSort: Number(currentVersion.createdAtMs || 0),
+        createdAt: currentVersion.createdAt || manifest.updatedAt || '',
+        size: Number(currentVersion.size || 0),
+        current: true,
+        currentVersionId: currentVersion.id,
+        hash: currentVersion.hash || '',
+        saveKey: manifest.saveKey,
+        manifestKey: saveVersionManifestRelative(manifest.saveKey),
+        notes: currentVersion.notes || ''
+      });
+    }
+    for (let version of versions) {
+      if (version.id === currentVersionId) {
+        continue;
+      }
+      records.push({
+        id: 'profile::version::' + manifest.saveKey + '::' + version.id,
+        pathKey: version.pathKey,
+        name: manifest.displayName || safeDecodeName(manifest.fileName || path.basename(manifest.saveKey || '')),
+        type: manifest.saveType || saveTypeForPath(manifest.saveKey),
+        source: version.source || 'Profile history',
+        versionLabel: version.createdAt || version.id,
+        versionSort: Number(version.createdAtMs || 0),
+        createdAt: version.createdAt || '',
+        size: Number(version.size || 0),
+        current: false,
+        versionId: version.id,
+        currentVersionId: currentVersionId,
+        hash: version.hash || '',
+        saveKey: manifest.saveKey,
+        manifestKey: saveVersionManifestRelative(manifest.saveKey),
+        notes: version.notes || ''
+      });
+    }
+  }
+  return records;
+}
+
 async function ensureDir(filePath) {
   await fsw.mkdir(path.dirname(filePath), {recursive: true});
 }
@@ -915,10 +1113,16 @@ app.post('/*', async function(req, res) {
           res.json(sent ? {status: 'success'} : error);
         } else if (type == 'listprofilesaves') {
           let profilePath = profilePathForUser(profile[hash].username);
-          let records = [];
+          let records = await listSaveVersionRecords(profilePath);
+          let seenSaveKeys = new Set(records.map(function(record) {
+            return record.saveKey || record.pathKey;
+          }));
           let currentFiles = await collectFiles(profilePath, '', []);
           for await (let file of currentFiles) {
-            if (!isSaveFile(file.relPath) || file.relPath.startsWith('.history/')) {
+            if (!isSaveFile(file.relPath) || file.relPath.startsWith('.history/') || file.relPath.startsWith(SAVE_VERSION_ROOT + '/')) {
+              continue;
+            }
+            if (seenSaveKeys.has(file.relPath)) {
               continue;
             }
             records.push({
@@ -926,10 +1130,13 @@ app.post('/*', async function(req, res) {
               pathKey: file.relPath,
               name: safeDecodeName(path.basename(file.relPath)),
               type: saveTypeForPath(file.relPath),
-              source: 'Profile: ' + file.relPath.split('/').slice(0, 2).join('/'),
-              versionLabel: 'Server current',
+              source: 'Profile current',
+              versionLabel: 'Current',
               versionSort: file.stat.mtimeMs || 0,
-              size: file.stat.size || 0
+              createdAt: file.stat.mtime ? new Date(file.stat.mtime).toISOString() : '',
+              size: file.stat.size || 0,
+              current: true,
+              saveKey: file.relPath
             });
           }
           let historyRoot = path.join(profilePath, '.history');
@@ -939,7 +1146,7 @@ app.post('/*', async function(req, res) {
               let snapshotRoot = path.join(historyRoot, snapshot);
               let snapshotFiles = await collectFiles(snapshotRoot, '', []);
               for await (let file of snapshotFiles) {
-                if (!isSaveFile(file.relPath)) {
+                if (!isSaveFile(file.relPath) || seenSaveKeys.has(file.relPath)) {
                   continue;
                 }
                 records.push({
@@ -947,14 +1154,23 @@ app.post('/*', async function(req, res) {
                   pathKey: '.history/' + snapshot + '/' + file.relPath,
                   name: safeDecodeName(path.basename(file.relPath)),
                   type: saveTypeForPath(file.relPath),
-                  source: 'Profile backup: ' + snapshot,
+                  source: 'Legacy backup: ' + snapshot,
                   versionLabel: snapshot,
                   versionSort: file.stat.mtimeMs || 0,
-                  size: file.stat.size || 0
+                  createdAt: file.stat.mtime ? new Date(file.stat.mtime).toISOString() : '',
+                  size: file.stat.size || 0,
+                  current: false,
+                  saveKey: file.relPath
                 });
               }
             }
           }
+          records.sort(function(a, b) {
+            if ((a.name || '') !== (b.name || '')) {
+              return String(a.name || '').localeCompare(String(b.name || ''));
+            }
+            return Number(b.versionSort || 0) - Number(a.versionSort || 0);
+          });
           res.json({status: 'success', saves: records});
         } else if (type == 'downloadprofilesave') {
           let profilePath = profilePathForUser(profile[hash].username);
@@ -977,26 +1193,44 @@ app.post('/*', async function(req, res) {
           await fsw.mkdir(profilePath, {recursive: true});
           let zip = await JSZip.loadAsync(baseData, {base64: true});
           let backupStamp = timestampLabel();
+          let saveSummary = { versioned: 0, created: 0, deduped: 0 };
           for await (let fileName of Object.keys(zip.files)) {
             let zipEntry = zip.files[fileName];
             if (zipEntry.dir) {
               await fsw.mkdir(safeProfilePath(profilePath, fileName), {recursive: true});
               continue;
             }
-            let targetPath = safeProfilePath(profilePath, fileName);
+            let normalizedFileName = normalizeSaveRelativePath(fileName);
+            let targetPath = safeProfilePath(profilePath, normalizedFileName);
             let content = Buffer.from(await zipEntry.async('arraybuffer'));
             await ensureDir(targetPath);
+            let changed = true;
             if (fs.existsSync(targetPath)) {
               let existing = await fsw.readFile(targetPath);
-              if (!existing.equals(content)) {
-                let backupPath = safeProfilePath(profilePath, '.history/' + backupStamp + '/' + fileName);
+              changed = !existing.equals(content);
+              if (changed) {
+                let backupPath = safeProfilePath(profilePath, '.history/' + backupStamp + '/' + normalizedFileName);
                 await ensureDir(backupPath);
                 await fsw.copyFile(targetPath, backupPath);
               }
             }
+            if (isSaveFile(normalizedFileName)) {
+              let versioned = await ensureSaveVersioned(profilePath, normalizedFileName, content, {
+                source: 'Profile sync push',
+                notes: changed ? 'Updated current save from client sync.' : 'Client sync matched existing current save.'
+              });
+              if (versioned) {
+                saveSummary.versioned += 1;
+                if (versioned.created) {
+                  saveSummary.created += 1;
+                } else {
+                  saveSummary.deduped += 1;
+                }
+              }
+            }
             await fsw.writeFile(targetPath, content);
           }
-          res.json({status: 'success',user: profile[hash].username});
+          res.json({status: 'success', user: profile[hash].username, saveSummary: saveSummary});
         // Send client data to write to indexedDB
         } else if (type == 'pull') {
           try {
@@ -1005,7 +1239,7 @@ app.post('/*', async function(req, res) {
             let items = await fs.readdirSync(profilePath);
             async function addToZip(item) {
               if (fs.lstatSync(item).isDirectory()) {
-                if (path.basename(item) === '.history') {
+                if (path.basename(item) === '.history' || path.basename(item) === SAVE_VERSION_ROOT) {
                   return;
                 }
                 let items = await fs.readdirSync(item);

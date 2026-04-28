@@ -276,6 +276,26 @@ body.profile-required .login-panel {
   box-shadow: 0 18px 55px rgba(0, 0, 0, .42);
   color: white;
   font-family: Arial, Helvetica, sans-serif;
+  overscroll-behavior: contain;
+  touch-action: pan-y pinch-zoom;
+  -webkit-overflow-scrolling: touch;
+}
+
+body.front-panel-open {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+body.front-panel-open #menu {
+  pointer-events: none;
+}
+
+body.front-panel-open .search-panel,
+body.front-panel-open .favorites-panel,
+body.front-panel-open .save-panel,
+body.front-panel-open .variant-panel,
+body.front-panel-open .login-panel {
+  pointer-events: auto;
 }
 
 .login-panel {

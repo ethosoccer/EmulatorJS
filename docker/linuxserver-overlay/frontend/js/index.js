@@ -196,6 +196,14 @@ function getActiveFrontPanel() {
   activeFrontPanelSelector = null;
   return null;
 }
+function syncFrontPanelState() {
+  var activeSelector = getActiveFrontPanel();
+  $('body').toggleClass('front-panel-open', !!activeSelector);
+  getFrontPanelSelectors().forEach(function(item) {
+    $(item).toggleClass('is-active-panel', item === activeSelector && !$(item).hasClass('hidden'));
+  });
+  return activeSelector;
+}
 function panelFocusableElements(selector) {
   if (!selector) {
     return $();
@@ -210,9 +218,7 @@ function focusFrontPanel(selector, preferredSelector) {
   activeFrontPanelSelector = selector;
   var $panel = $(selector);
   $panel.attr('tabindex', '-1');
-  getFrontPanelSelectors().forEach(function(item) {
-    $(item).toggleClass('is-active-panel', item === selector && !$(item).hasClass('hidden'));
-  });
+  syncFrontPanelState();
   var $preferred = preferredSelector ? $panel.find(preferredSelector).filter(':visible').first() : $();
   var $focusables = panelFocusableElements(selector);
   var $target = $preferred.length ? $preferred : ($focusables.length ? $focusables.first() : $panel);
@@ -230,9 +236,7 @@ function clearFrontPanelFocus(selector) {
   if (!selector || activeFrontPanelSelector === selector) {
     activeFrontPanelSelector = null;
   }
-  getFrontPanelSelectors().forEach(function(item) {
-    $(item).removeClass('is-active-panel');
-  });
+  syncFrontPanelState();
 }
 function moveFrontPanelFocus(delta) {
   var selector = getActiveFrontPanel();
@@ -3520,9 +3524,24 @@ async function rendermenu(datas) {
   var mc = new Hammer(document.getElementById('menu'));
   mc.get('swipe').set({ direction: Hammer.DIRECTION_ALL });
   mc.get('pan').set({ direction: Hammer.DIRECTION_ALL, threshold: 180 });
-  mc.on("swipeup", moveDown);
-  mc.on("swipedown", moveUp);
-  mc.on("panstart", scroll);
+  mc.on("swipeup", function(ev) {
+    if (getActiveFrontPanel()) {
+      return;
+    }
+    moveDown(ev);
+  });
+  mc.on("swipedown", function(ev) {
+    if (getActiveFrontPanel()) {
+      return;
+    }
+    moveUp(ev);
+  });
+  mc.on("panstart", function(ev) {
+    if (getActiveFrontPanel()) {
+      return;
+    }
+    scroll(ev);
+  });
   mc.on("panend", killScroll);
   // Render menu on orientation change
   $(window).on('orientationchange',function(){
@@ -3531,6 +3550,9 @@ async function rendermenu(datas) {
   });
   //// Mouse Scrolling ////
   $('#menu').bind('DOMMouseScroll', function(e){
+    if (getActiveFrontPanel()) {
+      return false;
+    }
     if(e.originalEvent.detail > 0) {
       moveDown();
     } else {
@@ -3539,12 +3561,19 @@ async function rendermenu(datas) {
     return false;
   });
   $('#menu').bind('mousewheel', function(e){
+    if (getActiveFrontPanel()) {
+      return false;
+    }
     if(e.originalEvent.wheelDelta < 0) {
       moveDown();
     } else {
       moveUp();
     };
     return false;
+  });
+  $(document).off('.frontpaneltrap');
+  $(document).on('wheel.frontpaneltrap mousewheel.frontpaneltrap DOMMouseScroll.frontpaneltrap touchstart.frontpaneltrap touchmove.frontpaneltrap pointerdown.frontpaneltrap pointermove.frontpaneltrap', '.search-panel, .favorites-panel, .save-panel, .variant-panel, .login-panel', function(event) {
+    event.stopPropagation();
   });
   //// GamePad controls ////
   let scrollDelay
@@ -3576,6 +3605,9 @@ async function rendermenu(datas) {
       gameStarted = false;
       var activePanel = getActiveFrontPanel();
       if (activePanel) {
+        if (!document.activeElement || !$(document.activeElement).closest(activePanel).length) {
+          focusFrontPanel(activePanel);
+        }
         if (!scrollDelay) {
           if ((buttonsMissing([1,3],[])) && (gp.axes[1] > .5 || gp.axes[3] > .5)) {
             scrollDelay = setTimeout(() => scrollDelay = undefined, 180);
@@ -3604,9 +3636,11 @@ async function rendermenu(datas) {
         gpUpdate = gp.timestamp;
         if (gp.buttons[0].pressed) {
           activateFrontPanelControl();
+          animReq = requestAnimationFrame(gameLoop);
           return;
         } else if (gp.buttons[1].pressed) {
           handleFrontPanelBack();
+          animReq = requestAnimationFrame(gameLoop);
           return;
         }
         animReq = requestAnimationFrame(gameLoop);

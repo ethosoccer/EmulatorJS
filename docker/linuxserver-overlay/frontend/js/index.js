@@ -3898,7 +3898,7 @@ async function rendermenu(datas) {
       gameStarted = false;
       var activePanel = getActiveFrontPanel();
       if (activePanel) {
-        if (!document.activeElement || !$(document.activeElement).closest(activePanel).length) {
+        if (frontPanelNavState.selector !== activePanel || !$(activePanel).find('.controller-selected').length) {
           focusFrontPanel(activePanel);
         }
         if (!scrollDelay) {

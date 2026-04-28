@@ -3822,6 +3822,58 @@ async function rendermenu(datas) {
   let home = 0;
   let homePressed = false;
   let gpUpdate;
+  function isAndroidHatController(gp) {
+    return !!(gp && gp.id && gp.id.indexOf('Bluetooth Wireless Controller') !== -1 && gp.axes && gp.axes.length >= 10);
+  }
+  function applyAndroidHatDirection(gp, direction) {
+    if (!isAndroidHatController(gp)) {
+      return direction;
+    }
+    var hat = typeof gp.axes[9] === 'number' ? gp.axes[9] : null;
+    if (hat === null) {
+      return direction;
+    }
+    if (hat < -0.75) {
+      direction.vertical = -1;
+      direction.horizontal = 0;
+    } else if (hat > -0.1 && hat < 0.35) {
+      direction.vertical = 1;
+      direction.horizontal = 0;
+    } else if (hat > 0.45 && hat < 0.95) {
+      direction.horizontal = -1;
+      direction.vertical = 0;
+    } else if (hat > -0.65 && hat < -0.2) {
+      direction.horizontal = 1;
+      direction.vertical = 0;
+    }
+    return direction;
+  }
+  function readMenuDirection(gp) {
+    var direction = {vertical: 0, horizontal: 0};
+    var axisY = typeof gp.axes[1] === 'number' ? gp.axes[1] : 0;
+    var axisX = typeof gp.axes[0] === 'number' ? gp.axes[0] : 0;
+    if (axisY > .5) {
+      direction.vertical = 1;
+    } else if (axisY < -.5) {
+      direction.vertical = -1;
+    }
+    if (axisX > .5) {
+      direction.horizontal = 1;
+    } else if (axisX < -.5) {
+      direction.horizontal = -1;
+    }
+    if (gp.buttons[13] && gp.buttons[13].pressed) {
+      direction.vertical = 1;
+    } else if (gp.buttons[12] && gp.buttons[12].pressed) {
+      direction.vertical = -1;
+    }
+    if (gp.buttons[15] && gp.buttons[15].pressed) {
+      direction.horizontal = 1;
+    } else if (gp.buttons[14] && gp.buttons[14].pressed) {
+      direction.horizontal = -1;
+    }
+    return applyAndroidHatDirection(gp, direction);
+  }
   function gameLoop() {
     // Handle if buttons are missing
     function buttonsMissing(axes,buttons) {
@@ -3841,6 +3893,7 @@ async function rendermenu(datas) {
     let gamePads = navigator.getGamepads();
     if (!gamePads?.[0]) return;
     let gp = gamePads[0];
+    var direction = readMenuDirection(gp);
     if (window.location.hash != "#game") {
       gameStarted = false;
       var activePanel = getActiveFrontPanel();
@@ -3849,28 +3902,16 @@ async function rendermenu(datas) {
           focusFrontPanel(activePanel);
         }
         if (!scrollDelay) {
-          if ((buttonsMissing([1,3],[])) && (gp.axes[1] > .5 || gp.axes[3] > .5)) {
+          if (direction.vertical > 0) {
             scrollDelay = setTimeout(() => scrollDelay = undefined, 180);
             moveFrontPanelFocus(1);
-          } else if ((buttonsMissing([1,3],[])) && (gp.axes[1] < -.5 || gp.axes[3] < -.5)) {
+          } else if (direction.vertical < 0) {
             scrollDelay = setTimeout(() => scrollDelay = undefined, 180);
             moveFrontPanelFocus(-1);
-          } else if ((buttonsMissing([0,2],[])) && (gp.axes[0] > .5 || gp.axes[2] > .5)) {
+          } else if (direction.horizontal > 0) {
             scrollDelay = setTimeout(() => scrollDelay = undefined, 180);
             moveFrontPanelHorizontal(1);
-          } else if ((buttonsMissing([0,2],[])) && (gp.axes[0] < -.5 || gp.axes[2] < -.5)) {
-            scrollDelay = setTimeout(() => scrollDelay = undefined, 180);
-            moveFrontPanelHorizontal(-1);
-          } else if ((buttonsMissing([],[13])) && (gp.buttons[13].pressed)) {
-            scrollDelay = setTimeout(() => scrollDelay = undefined, 180);
-            moveFrontPanelFocus(1);
-          } else if ((buttonsMissing([],[12])) && (gp.buttons[12].pressed)) {
-            scrollDelay = setTimeout(() => scrollDelay = undefined, 180);
-            moveFrontPanelFocus(-1);
-          } else if ((buttonsMissing([],[15])) && (gp.buttons[15].pressed)) {
-            scrollDelay = setTimeout(() => scrollDelay = undefined, 180);
-            moveFrontPanelHorizontal(1);
-          } else if ((buttonsMissing([],[14])) && (gp.buttons[14].pressed)) {
+          } else if (direction.horizontal < 0) {
             scrollDelay = setTimeout(() => scrollDelay = undefined, 180);
             moveFrontPanelHorizontal(-1);
           }
@@ -3894,19 +3935,11 @@ async function rendermenu(datas) {
       }
       if (!scrollDelay) {
         // Analog down
-        if ((buttonsMissing([1,3],[])) && (gp.axes[1] > .5 || gp.axes[3] > .5)) {
+        if (direction.vertical > 0) {
           scrollDelay = setTimeout(() => scrollDelay = undefined, 200);
           moveDown();
         // Analog up
-        } else if ((buttonsMissing([1,3],[])) && (gp.axes[1] < -.5 || gp.axes[3] < -.5)) {
-          scrollDelay = setTimeout(() => scrollDelay = undefined, 200);
-          moveUp();
-        // D-pad down
-        } else if ((buttonsMissing([],[13])) && (gp.buttons[13].pressed)) {
-          scrollDelay = setTimeout(() => scrollDelay = undefined, 200);
-          moveDown();
-        // D-pad up
-        } else if ((buttonsMissing([],[12])) && (gp.buttons[12].pressed)) {
+        } else if (direction.vertical < 0) {
           scrollDelay = setTimeout(() => scrollDelay = undefined, 200);
           moveUp();
         // R1 index down
@@ -3933,16 +3966,10 @@ async function rendermenu(datas) {
             scrollDelay = setTimeout(() => scrollDelay = undefined, 40);
           }
           moveDown();
-        } else if ((buttonsMissing([0,2],[])) && (gp.axes[0] > .5 || gp.axes[2] > .5)) {
+        } else if (direction.horizontal > 0) {
           scrollDelay = setTimeout(() => scrollDelay = undefined, 180);
           moveMenuHorizontal(1);
-        } else if ((buttonsMissing([0,2],[])) && (gp.axes[0] < -.5 || gp.axes[2] < -.5)) {
-          scrollDelay = setTimeout(() => scrollDelay = undefined, 180);
-          moveMenuHorizontal(-1);
-        } else if ((buttonsMissing([],[15])) && (gp.buttons[15].pressed)) {
-          scrollDelay = setTimeout(() => scrollDelay = undefined, 180);
-          moveMenuHorizontal(1);
-        } else if ((buttonsMissing([],[14])) && (gp.buttons[14].pressed)) {
+        } else if (direction.horizontal < 0) {
           scrollDelay = setTimeout(() => scrollDelay = undefined, 180);
           moveMenuHorizontal(-1);
         }

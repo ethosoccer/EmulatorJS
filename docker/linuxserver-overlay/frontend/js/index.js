@@ -753,8 +753,226 @@ function historyVersionLabel(fileName) {
   var match = String(fileName || '').match(/^\.history\/([^/]+)\//i);
   return match ? match[1] : 'Local backup';
 }
+var localSaveVersionRoot = '.save-versions';
+function normalizeLocalSavePath(fileName) {
+  return String(fileName || '').replace(/\\/g, '/').replace(/^\/+/, '');
+}
+function localSaveVersionStorageKey(fileName) {
+  var value = normalizeLocalSavePath(fileName);
+  var out = '';
+  for (var i = 0; i < value.length; i++) {
+    out += value.charCodeAt(i).toString(16).padStart(2, '0');
+  }
+  return out;
+}
+function localSaveVersionDir(fileName) {
+  return '/' + localSaveVersionRoot + '/' + localSaveVersionStorageKey(fileName);
+}
+function localSaveManifestPath(fileName) {
+  return localSaveVersionDir(fileName) + '/manifest.json';
+}
+function localSaveVersionPath(fileName, versionId) {
+  return localSaveVersionDir(fileName) + '/versions/' + versionId + '.bin';
+}
+function localSaveManifestDefaults(fileName) {
+  var normalized = normalizeLocalSavePath(fileName);
+  var parts = normalized.split('/');
+  var leaf = parts[parts.length - 1] || '';
+  return {
+    saveKey: normalized,
+    fileName: leaf,
+    displayName: safeDecodeDisplayName(leaf),
+    scope: parts[0] || '',
+    core: parts[1] || '',
+    saveType: profileSaveType(normalized),
+    createdAt: '',
+    updatedAt: '',
+    currentVersionId: '',
+    currentHash: '',
+    versions: []
+  };
+}
+async function localSaveContentHash(buffer) {
+  var bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+  if (window.crypto && window.crypto.subtle && window.crypto.subtle.digest) {
+    var digest = await window.crypto.subtle.digest('SHA-256', bytes);
+    return Array.from(new Uint8Array(digest)).map(function(byte) {
+      return byte.toString(16).padStart(2, '0');
+    }).join('');
+  }
+  return saveBytesSignature(bytes);
+}
+function readLocalSaveManifest(fileName) {
+  var manifestPath = localSaveManifestPath(fileName);
+  try {
+    if (!profileFs.existsSync(manifestPath)) {
+      return localSaveManifestDefaults(fileName);
+    }
+    var parsed = JSON.parse(String(profileFs.readFileSync(manifestPath), 'utf8'));
+    return Object.assign(localSaveManifestDefaults(fileName), parsed || {}, {
+      versions: Array.isArray(parsed && parsed.versions) ? parsed.versions : []
+    });
+  } catch (e) {
+    console.log('Unable to read local save manifest', e);
+    return localSaveManifestDefaults(fileName);
+  }
+}
+function writeLocalSaveManifest(fileName, manifest) {
+  var manifestPath = localSaveManifestPath(fileName);
+  ensureProfileDirSync(manifestPath.split('/').slice(0, -1).join('/') || '/');
+  profileFs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
+}
+function sortLocalSaveVersionsNewestFirst(versions) {
+  return (versions || []).slice().sort(function(a, b) {
+    return Number(b.createdAtMs || 0) - Number(a.createdAtMs || 0);
+  });
+}
+async function ensureLocalSaveVersioned(relativePath, buffer, options) {
+  var normalized = normalizeLocalSavePath(relativePath);
+  if (!isProfileSavePath(normalized)) {
+    return null;
+  }
+  var bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+  var manifest = readLocalSaveManifest(normalized);
+  var now = new Date();
+  var nowIso = now.toISOString();
+  var nowMs = now.getTime();
+  var hash = await localSaveContentHash(bytes);
+  var size = bytes.byteLength || bytes.length || 0;
+  var existingVersion = (manifest.versions || []).find(function(version) {
+    return version.hash === hash && Number(version.size || 0) === size;
+  });
+  var created = false;
+  if (!manifest.createdAt) {
+    manifest.createdAt = nowIso;
+  }
+  if (!existingVersion) {
+    created = true;
+    var versionId = 'local-' + nowIso.replace(/[:.]/g, '-') + '--' + String(hash).slice(0, 12);
+    var versionPath = localSaveVersionPath(normalized, versionId);
+    ensureProfileDirSync(versionPath.split('/').slice(0, -1).join('/') || '/');
+    profileFs.writeFileSync(versionPath, Buffer.from(bytes));
+    existingVersion = {
+      id: versionId,
+      createdAt: nowIso,
+      createdAtMs: nowMs,
+      hash: hash,
+      size: size,
+      saveType: manifest.saveType,
+      scope: manifest.scope,
+      core: manifest.core,
+      fileName: manifest.fileName,
+      displayName: manifest.displayName,
+      source: options && options.source || 'Local profile',
+      notes: options && options.notes || '',
+      pathKey: versionPath.replace(/^\//, '')
+    };
+    manifest.versions.push(existingVersion);
+  }
+  manifest.currentVersionId = existingVersion.id;
+  manifest.currentHash = hash;
+  manifest.updatedAt = nowIso;
+  manifest.versions = sortLocalSaveVersionsNewestFirst(manifest.versions);
+  writeLocalSaveManifest(normalized, manifest);
+  return {
+    manifest: manifest,
+    version: existingVersion,
+    created: created,
+    hash: hash,
+    size: size
+  };
+}
+async function listLocalSaveVersionRecords() {
+  await setupProfileFs();
+  if (!profileFs) {
+    return [];
+  }
+  var manifests = [];
+  async function walk(dirPath) {
+    if (!profileFs.existsSync(dirPath)) {
+      return;
+    }
+    var items = profileFs.readdirSync(dirPath);
+    for (var item of items) {
+      var fullPath = (dirPath === '/' ? '' : dirPath) + '/' + item;
+      if (profileFs.lstatSync(fullPath).isDirectory()) {
+        await walk(fullPath);
+      } else if (/\/manifest\.json$/i.test(fullPath)) {
+        manifests.push(fullPath);
+      }
+    }
+  }
+  await walk('/' + localSaveVersionRoot);
+  var saves = [];
+  for (var manifestPath of manifests) {
+    var parsed;
+    try {
+      parsed = JSON.parse(String(profileFs.readFileSync(manifestPath), 'utf8'));
+    } catch (e) {
+      continue;
+    }
+    var manifest = Object.assign(localSaveManifestDefaults(parsed && parsed.saveKey || ''), parsed || {});
+    var versions = sortLocalSaveVersionsNewestFirst(Array.isArray(manifest.versions) ? manifest.versions : []);
+    var currentVersionId = manifest.currentVersionId || '';
+    var currentVersion = versions.find(function(version) {
+      return version.id === currentVersionId;
+    }) || versions[0] || null;
+    if (currentVersion) {
+      saves.push({
+        id: 'localprofile::current::' + manifest.saveKey,
+        key: manifest.saveKey,
+        name: manifest.displayName || safeDecodeDisplayName(manifest.fileName || manifest.saveKey.split('/').pop()),
+        type: manifest.saveType || profileSaveType(manifest.saveKey),
+        source: 'Local profile',
+        size: Number(currentVersion.size || 0),
+        versionLabel: 'Current',
+        versionSort: Number(currentVersion.createdAtMs || 0),
+        current: true,
+        createdAt: currentVersion.createdAt || manifest.updatedAt || '',
+        saveKey: manifest.saveKey,
+        versionId: currentVersion.id,
+        currentVersionId: currentVersion.id,
+        hash: currentVersion.hash || '',
+        notes: currentVersion.notes || '',
+        load: async function(pathKey) {
+          return Buffer.from(profileFs.readFileSync('/' + pathKey));
+        }.bind(null, manifest.saveKey)
+      });
+    }
+    for (var version of versions) {
+      if (version.id === currentVersionId) {
+        continue;
+      }
+      saves.push({
+        id: 'localprofile::version::' + manifest.saveKey + '::' + version.id,
+        key: version.pathKey,
+        name: manifest.displayName || safeDecodeDisplayName(manifest.fileName || manifest.saveKey.split('/').pop()),
+        type: manifest.saveType || profileSaveType(manifest.saveKey),
+        source: version.source || 'Local history',
+        size: Number(version.size || 0),
+        versionLabel: version.createdAt || version.id,
+        versionSort: Number(version.createdAtMs || 0),
+        current: false,
+        createdAt: version.createdAt || '',
+        saveKey: manifest.saveKey,
+        versionId: version.id,
+        currentVersionId: currentVersionId,
+        hash: version.hash || '',
+        notes: version.notes || '',
+        load: async function(pathKey) {
+          return Buffer.from(profileFs.readFileSync('/' + pathKey));
+        }.bind(null, version.pathKey)
+      });
+    }
+  }
+  return saves;
+}
 async function buildLocalProfileSaveInventory() {
   try {
+    var saves = await listLocalSaveVersionRecords();
+    if (saves.length) {
+      return saves;
+    }
     await setupProfileFs();
     var files = [];
     async function walk(dirPath) {
@@ -772,7 +990,7 @@ async function buildLocalProfileSaveInventory() {
       }
     }
     await walk('/');
-    var saves = [];
+    var legacySaves = [];
     for (var fileName of files) {
       var localName = fileName;
       var versionLabel = 'Local profile';
@@ -780,12 +998,12 @@ async function buildLocalProfileSaveInventory() {
         localName = historyRelativeSavePath(fileName);
         versionLabel = historyVersionLabel(fileName);
       }
-      if (!isProfileSavePath(localName)) {
+      if (!isProfileSavePath(localName) || String(fileName).indexOf(localSaveVersionRoot + '/') === 0) {
         continue;
       }
       var bytes = profileFs.readFileSync('/' + fileName);
       var localStat = profileFs.statSync('/' + fileName);
-      saves.push({
+      legacySaves.push({
         id: 'localprofile::' + fileName,
         key: fileName,
         name: safeDecodeDisplayName(localName.split('/').pop()),
@@ -801,7 +1019,7 @@ async function buildLocalProfileSaveInventory() {
         }.bind(null, bytes)
       });
     }
-    return saves;
+    return legacySaves;
   } catch(e) {
     console.log('Unable to scan local profile saves', e);
     return [];
@@ -1663,23 +1881,38 @@ function localProfileBackupPath(relativePath, stamp) {
   return '/.history/' + stamp + '/' + String(relativePath || '').replace(/^\/+/, '');
 }
 async function writeProfileFileWithBackup(relativePath, buffer, stamp) {
-  var targetPath = '/' + String(relativePath || '').replace(/^\/+/, '');
+  var normalizedPath = normalizeLocalSavePath(relativePath);
+  var targetPath = '/' + normalizedPath;
   var parent = targetPath.split('/').slice(0, -1).join('/') || '/';
   ensureProfileDirSync(parent);
+  var changed = true;
   if (profileFs.existsSync(targetPath)) {
     var existing = profileFs.readFileSync(targetPath);
     if (Buffer.from(existing).equals(Buffer.from(buffer))) {
+      if (isProfileSavePath(normalizedPath)) {
+        await ensureLocalSaveVersioned(normalizedPath, Buffer.from(buffer), {
+          source: 'Local profile',
+          notes: 'Local profile write matched current bytes.'
+        });
+      }
       return;
     }
+    changed = true;
     var backupPath = localProfileBackupPath(relativePath, stamp);
     var backupParent = backupPath.split('/').slice(0, -1).join('/') || '/';
     ensureProfileDirSync(backupParent);
     profileFs.writeFileSync(backupPath, Buffer.from(existing));
   }
   profileFs.writeFileSync(targetPath, Buffer.from(buffer));
+  if (isProfileSavePath(normalizedPath)) {
+    await ensureLocalSaveVersioned(normalizedPath, Buffer.from(buffer), {
+      source: 'Local profile',
+      notes: changed ? 'Stored local browser version.' : 'Stored local browser version.'
+    });
+  }
 }
 async function addProfileFsToZip(zip, item) {
-  if (item === '/.history' || item.indexOf('/.history/') === 0) {
+  if (item === '/.history' || item.indexOf('/.history/') === 0 || item === '/' + localSaveVersionRoot || item.indexOf('/' + localSaveVersionRoot + '/') === 0) {
     return;
   }
   if (profileFs.lstatSync(item).isDirectory()) {

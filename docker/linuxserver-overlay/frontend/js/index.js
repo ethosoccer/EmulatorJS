@@ -307,8 +307,16 @@ function syncFrontPanelNavigation(selector, options) {
   var rowControls = selectedRow && selectedRow.jquery ? selectedRow : $(selectedRow);
   frontPanelNavState.col = Math.max(0, Math.min(frontPanelNavState.col, rowControls.length - 1));
   clearControllerSelectionClasses();
+  panelFocusableElements(selector).attr('tabindex', '-1');
   var $target = rowControls.eq(frontPanelNavState.col);
+  $target.attr('tabindex', '0');
   $target.addClass('controller-selected');
+  var targetElement = $target.get(0);
+  if (targetElement && typeof targetElement.scrollIntoView === 'function') {
+    try {
+      targetElement.scrollIntoView({block: 'nearest', inline: 'nearest'});
+    } catch (e) {}
+  }
   focusDomElement($target, $(selector));
   return true;
 }
@@ -435,6 +443,72 @@ function moveFrontPanelFocus(delta) {
 }
 function activateFrontPanelControl() {
   return activateCurrentFrontPanelControl();
+}
+function handleActiveFrontPanelKeydown(event) {
+  var activePanel = getActiveFrontPanel();
+  if (!activePanel) {
+    return false;
+  }
+  if ($(event.target).is('input, select, textarea')) {
+    return false;
+  }
+  syncFrontPanelNavigation(activePanel, {preserve: true});
+  if (event.key == 'ArrowDown') {
+    event.preventDefault();
+    moveFrontPanelFocus(1);
+    return true;
+  }
+  if (event.key == 'ArrowUp') {
+    event.preventDefault();
+    moveFrontPanelFocus(-1);
+    return true;
+  }
+  if (event.key == 'ArrowRight') {
+    event.preventDefault();
+    moveFrontPanelHorizontal(1);
+    return true;
+  }
+  if (event.key == 'ArrowLeft') {
+    event.preventDefault();
+    moveFrontPanelHorizontal(-1);
+    return true;
+  }
+  if (event.key == 'Enter' || event.key == ' ') {
+    event.preventDefault();
+    activateFrontPanelControl();
+    return true;
+  }
+  if (event.key == 'Escape' || event.key == 'Backspace') {
+    event.preventDefault();
+    handleFrontPanelBack();
+    return true;
+  }
+  return false;
+}
+function updateFrontPanelNavFromElement(element) {
+  var activePanel = getActiveFrontPanel();
+  if (!activePanel || !element) {
+    return false;
+  }
+  var rows = panelNavigationRows(activePanel);
+  if (!rows.length) {
+    return false;
+  }
+  for (var rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+    var rowControls = rows[rowIndex] && rows[rowIndex].jquery ? rows[rowIndex] : $(rows[rowIndex]);
+    for (var colIndex = 0; colIndex < rowControls.length; colIndex++) {
+      if (rowControls.get(colIndex) === element) {
+        frontPanelNavState = {
+          selector: activePanel,
+          row: rowIndex,
+          col: colIndex
+        };
+        syncFrontPanelNavigation(activePanel, {preserve: true});
+        return true;
+      }
+    }
+  }
+  return false;
 }
 function handleFrontPanelBack() {
   var selector = getActiveFrontPanel();
@@ -3597,41 +3671,9 @@ async function rendermenu(datas) {
   let upPressed = false;
   let downPressed = false;
   $(document).keydown(function(event) {
-    var activePanel = getActiveFrontPanel();
-    if (activePanel && $(event.target).is('input, select, textarea')) {
+    if (handleActiveFrontPanelKeydown(event)) {
+      event.stopPropagation();
       return;
-    }
-    if (activePanel) {
-      if (event.key == 'ArrowDown') {
-        event.preventDefault();
-        moveFrontPanelFocus(1);
-        return;
-      }
-      if (event.key == 'ArrowUp') {
-        event.preventDefault();
-        moveFrontPanelFocus(-1);
-        return;
-      }
-      if (event.key == 'ArrowRight') {
-        event.preventDefault();
-        moveFrontPanelHorizontal(1);
-        return;
-      }
-      if (event.key == 'ArrowLeft') {
-        event.preventDefault();
-        moveFrontPanelHorizontal(-1);
-        return;
-      }
-      if (event.key == 'Enter') {
-        event.preventDefault();
-        activateFrontPanelControl();
-        return;
-      }
-      if (event.key == 'Escape') {
-        event.preventDefault();
-        handleFrontPanelBack();
-        return;
-      }
     }
     if ($(event.target).is('input, select, textarea')) {
       return;
@@ -3761,6 +3803,17 @@ async function rendermenu(datas) {
   $(document).off('.frontpaneltrap');
   $(document).on('wheel.frontpaneltrap mousewheel.frontpaneltrap DOMMouseScroll.frontpaneltrap touchstart.frontpaneltrap touchmove.frontpaneltrap pointerdown.frontpaneltrap pointermove.frontpaneltrap', '.search-panel, .favorites-panel, .save-panel, .variant-panel, .login-panel', function(event) {
     event.stopPropagation();
+  });
+  $(document).off('keydown.frontpanelnav');
+  $(document).on('keydown.frontpanelnav', '.search-panel, .favorites-panel, .save-panel, .variant-panel, .login-panel, .search-panel button, .favorites-panel button, .save-panel button, .variant-panel button, .login-panel button', function(event) {
+    if (handleActiveFrontPanelKeydown(event)) {
+      event.stopPropagation();
+      return false;
+    }
+  });
+  $(document).off('focusin.frontpanelnav');
+  $(document).on('focusin.frontpanelnav', '.search-panel button, .favorites-panel button, .save-panel button, .variant-panel button, .login-panel button', function() {
+    updateFrontPanelNavFromElement(this);
   });
   //// GamePad controls ////
   let scrollDelay

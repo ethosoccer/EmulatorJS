@@ -211,6 +211,47 @@ function panelFocusableElements(selector) {
   return $(selector).find('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')
     .filter(':visible');
 }
+function focusDomElement($element, fallbackPanel) {
+  var $target = $element && $element.length ? $element.first() : $();
+  var target = $target.length ? $target.get(0) : null;
+  if (target && typeof target.focus === 'function') {
+    try {
+      target.focus({preventScroll: true});
+      return true;
+    } catch (e) {
+      try {
+        target.focus();
+        return true;
+      } catch (ignore) {}
+    }
+  }
+  if (fallbackPanel && fallbackPanel.length) {
+    var panel = fallbackPanel.get(0);
+    if (panel && typeof panel.focus === 'function') {
+      try {
+        panel.focus({preventScroll: true});
+        return true;
+      } catch (err) {
+        try {
+          panel.focus();
+          return true;
+        } catch (ignorePanel) {}
+      }
+    }
+  }
+  return false;
+}
+function clickDomElement($element) {
+  var target = $element && $element.length ? $element.first().get(0) : null;
+  if (!target) {
+    return false;
+  }
+  if (typeof target.click === 'function') {
+    target.click();
+    return true;
+  }
+  return false;
+}
 function focusFrontPanel(selector, preferredSelector) {
   if (!selector || $(selector).hasClass('hidden')) {
     return;
@@ -223,13 +264,7 @@ function focusFrontPanel(selector, preferredSelector) {
   var $focusables = panelFocusableElements(selector);
   var $target = $preferred.length ? $preferred : ($focusables.length ? $focusables.first() : $panel);
   setTimeout(function() {
-    try {
-      $target.trigger('focus');
-    } catch (e) {
-      try {
-        $panel.trigger('focus');
-      } catch (ignore) {}
-    }
+    focusDomElement($target, $panel);
   }, 0);
 }
 function clearFrontPanelFocus(selector) {
@@ -251,10 +286,10 @@ function moveFrontPanelFocus(delta) {
   var current = document.activeElement;
   var currentIndex = $focusables.toArray().indexOf(current);
   if (currentIndex < 0) {
-    currentIndex = 0;
+    currentIndex = delta > 0 ? -1 : 0;
   }
   var nextIndex = (currentIndex + delta + $focusables.length) % $focusables.length;
-  $focusables.eq(nextIndex).trigger('focus');
+  focusDomElement($focusables.eq(nextIndex), $(selector));
   return true;
 }
 function activateFrontPanelControl() {
@@ -264,13 +299,15 @@ function activateFrontPanelControl() {
   }
   var current = document.activeElement;
   if (current && $(current).closest(selector).length) {
-    $(current).trigger('click');
-    return true;
+    if (clickDomElement($(current))) {
+      return true;
+    }
   }
   var $focusables = panelFocusableElements(selector);
   if ($focusables.length) {
-    $focusables.first().trigger('focus').trigger('click');
-    return true;
+    var $first = $focusables.first();
+    focusDomElement($first, $(selector));
+    return clickDomElement($first);
   }
   return false;
 }

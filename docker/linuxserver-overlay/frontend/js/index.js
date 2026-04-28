@@ -504,11 +504,69 @@ function formatDateTime(timestamp) {
     return 'time unavailable';
   }
 }
+function saveSortValue(save) {
+  if (!save) {
+    return 0;
+  }
+  return Number(save.versionSort || 0);
+}
+function saveStateLabel(save) {
+  if (save && save.current) {
+    return 'Current';
+  }
+  if (save && String(save.source || '').toLowerCase().indexOf('backup') !== -1) {
+    return 'History';
+  }
+  if (save && String(save.source || '').toLowerCase().indexOf('history') !== -1) {
+    return 'History';
+  }
+  return 'Saved';
+}
+function saveSourceLabel(save) {
+  if (!save) {
+    return 'Unknown source';
+  }
+  if (String(save.source || '').toLowerCase().indexOf('profile current') !== -1) {
+    return 'Server current';
+  }
+  if (String(save.source || '').toLowerCase().indexOf('profile history') !== -1) {
+    return 'Server history';
+  }
+  if (String(save.source || '').toLowerCase().indexOf('legacy backup') !== -1) {
+    return 'Legacy backup';
+  }
+  if (String(save.source || '').toLowerCase().indexOf('local backup') !== -1) {
+    return 'Local backup';
+  }
+  if (String(save.source || '').toLowerCase().indexOf('local profile') !== -1) {
+    return 'Local profile';
+  }
+  return save.source || 'Unknown source';
+}
+function saveBadges(save) {
+  var badges = [saveStateLabel(save), saveSourceLabel(save)];
+  if (save && save.type) {
+    badges.push(save.type);
+  }
+  return badges.filter(Boolean);
+}
 function saveVersionSummary(save) {
-  return (save.versionLabel || save.source || 'Version') + ' - ' + formatDateTime(save.versionSort) + ' - ' + (save.type || 'Save') + ' - ' + formatBytes(save.size);
+  var parts = [];
+  if (save && save.versionLabel) {
+    parts.push(save.versionLabel);
+  }
+  parts.push(formatDateTime(saveSortValue(save)));
+  parts.push(formatBytes(save && save.size));
+  return parts.filter(Boolean).join(' - ');
 }
 function groupedSaveSummary(group) {
-  return (group.latest.type || 'Save') + ' - ' + (group.latest.versionLabel || group.latest.source || 'Latest') + ' - ' + formatDateTime(group.latest.versionSort) + ' - ' + group.versions.length + ' version' + (group.versions.length === 1 ? '' : 's');
+  var parts = [];
+  if (group.hasCurrent) {
+    parts.push('Current available');
+  }
+  parts.push(group.versions.length + ' version' + (group.versions.length === 1 ? '' : 's'));
+  parts.push('Latest ' + formatDateTime(saveSortValue(group.latest)));
+  return parts.join(' - ');
 }
 function bytesFromSaveValue(value) {
   if (!value) {
@@ -736,6 +794,8 @@ async function buildLocalProfileSaveInventory() {
         size: saveByteLength(bytes),
         versionLabel: versionLabel,
         versionSort: localStat && localStat.mtimeMs ? localStat.mtimeMs : Date.now(),
+        current: !isHistoryProfileSavePath(fileName),
+        createdAt: localStat && localStat.mtime ? new Date(localStat.mtime).toISOString() : '',
         load: async function(data) {
           return data;
         }.bind(null, bytes)
@@ -769,6 +829,13 @@ async function buildProfileSaveInventory() {
         size: profileSave.size || 0,
         versionLabel: profileSave.versionLabel || 'Server current',
         versionSort: profileSave.versionSort || 0,
+        current: profileSave.current === true,
+        createdAt: profileSave.createdAt || '',
+        saveKey: profileSave.saveKey || '',
+        versionId: profileSave.versionId || '',
+        currentVersionId: profileSave.currentVersionId || '',
+        hash: profileSave.hash || '',
+        notes: profileSave.notes || '',
         pathKey: profileSave.pathKey,
         load: async function(pathKey) {
           var download = await profileRequest(profileRequestBody('downloadprofilesave', {pathKey: pathKey}));
@@ -904,9 +971,15 @@ function groupSaveVariants(saves) {
   }
   var grouped = Object.keys(groups).map(function(key) {
     groups[key].versions.sort(function(a, b) {
-      return Number(b.versionSort || 0) - Number(a.versionSort || 0);
+      if (!!a.current !== !!b.current) {
+        return a.current ? -1 : 1;
+      }
+      return saveSortValue(b) - saveSortValue(a);
     });
     groups[key].latest = groups[key].versions[0];
+    groups[key].hasCurrent = groups[key].versions.some(function(version) {
+      return version.current;
+    });
     return groups[key];
   });
   grouped.sort(function(a, b) {
@@ -921,7 +994,15 @@ function renderSaveVersionRows(target, saves, options) {
     var row = $('<div>').addClass('save-file-row');
     var detail = $('<button>').addClass('search-result').attr('type', 'button');
     detail.append($('<span>').addClass('save-file-title').text(save.name));
+    var badges = $('<span>').addClass('save-file-badges');
+    saveBadges(save).forEach(function(label) {
+      badges.append($('<span>').addClass('save-file-badge').text(label));
+    });
+    detail.append(badges);
     detail.append($('<span>').addClass('save-file-meta').text(saveVersionSummary(save)));
+    if (save.notes) {
+      detail.append($('<span>').addClass('save-file-note').text(save.notes));
+    }
     detail.on('click', function(saveId) {
       return async function() {
         if (options.mode === 'launch' && typeof options.onSelect === 'function') {
@@ -966,6 +1047,9 @@ function openSaveVersionPicker(group, backHandler, options) {
       downloadSaveList(group.versions.map(function(save) { return save.id; }), saveBasename(group.name) + '-versions.zip');
     });
     $('#save-panel-results').append(allButton);
+  }
+  if (group.hasCurrent) {
+    $('#save-panel-results').append($('<div>').addClass('search-status').text('Current save is shown first. Older versions remain available below it.'));
   }
   renderSaveVersionRows('#save-panel-results', group.versions, options);
   focusFrontPanel('#save-panel', '.search-result, button');
@@ -1013,6 +1097,12 @@ function renderSaveRows(target, saves, emptyMessage, backHandler, options) {
     var row = $('<div>').addClass('save-file-row');
     var detail = $('<button>').addClass('search-result').attr('type', 'button');
     detail.append($('<span>').addClass('save-file-title').text(safeDecodeDisplayName(group.name)));
+    var badges = $('<span>').addClass('save-file-badges');
+    if (group.hasCurrent) {
+      badges.append($('<span>').addClass('save-file-badge').text('Current available'));
+    }
+    badges.append($('<span>').addClass('save-file-badge').text(group.versions.length + ' version' + (group.versions.length === 1 ? '' : 's')));
+    detail.append(badges);
     detail.append($('<span>').addClass('save-file-meta').text(groupedSaveSummary(group)));
     detail.on('click', function(saveGroup) {
       return function() {

@@ -658,10 +658,37 @@ body.profile-required .profile-login-copy {
   overflow-wrap: anywhere;
 }
 
+.save-file-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 5px;
+}
+
+.save-file-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 2px 8px;
+  border: 1px solid rgba(143, 214, 255, .28);
+  border-radius: 6px;
+  background: rgba(143, 214, 255, .10);
+  color: rgba(255, 255, 255, .86);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
 .save-file-meta {
   display: block;
   margin-top: 3px;
   color: rgba(255, 255, 255, .66);
+  font-size: 12px;
+}
+
+.save-file-note {
+  display: block;
+  margin-top: 4px;
+  color: rgba(255, 255, 255, .55);
   font-size: 12px;
 }
 

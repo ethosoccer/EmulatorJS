@@ -38,6 +38,7 @@ var pendingLaunchSelection = null;
 var activeFrontPanelSelector = null;
 var frontPanelNavState = {selector: null, row: 0, col: 0};
 var menuActionIndex = 0;
+var currentMenuActiveItem = 0;
 var requireMainLogin = false;
 var isSafari = navigator.vendor && navigator.vendor.indexOf('Apple') > -1 &&
                navigator.userAgent &&
@@ -360,18 +361,18 @@ function getMenuRowControls(index) {
 }
 function syncMenuControllerSelection() {
   clearControllerSelectionClasses();
-  var $controls = getMenuRowControls(active_item);
+  var $controls = getMenuRowControls(currentMenuActiveItem);
   if (!$controls.length) {
     return false;
   }
   menuActionIndex = Math.max(0, Math.min(menuActionIndex, $controls.length - 1));
   var $target = $controls.eq(menuActionIndex);
   $target.addClass('controller-selected');
-  focusDomElement($target, $('#h' + active_item));
+  focusDomElement($target, $('#h' + currentMenuActiveItem));
   return true;
 }
 function moveMenuHorizontal(delta) {
-  var $controls = getMenuRowControls(active_item);
+  var $controls = getMenuRowControls(currentMenuActiveItem);
   if (!$controls.length) {
     return false;
   }
@@ -379,13 +380,13 @@ function moveMenuHorizontal(delta) {
   return syncMenuControllerSelection();
 }
 function activateCurrentMenuControl() {
-  var $controls = getMenuRowControls(active_item);
+  var $controls = getMenuRowControls(currentMenuActiveItem);
   if (!$controls.length) {
     return false;
   }
   menuActionIndex = Math.max(0, Math.min(menuActionIndex, $controls.length - 1));
   var $target = $controls.eq(menuActionIndex);
-  focusDomElement($target, $('#h' + active_item));
+  focusDomElement($target, $('#h' + currentMenuActiveItem));
   return clickDomElement($target);
 }
 function focusFrontPanel(selector, preferredSelector) {
@@ -3472,6 +3473,7 @@ async function rendermenu(datas) {
     } else if (active_item > items_length) {
       active_item = 0;
     }
+    currentMenuActiveItem = active_item;
     var count = 0;
     for (var entry of filteredEntries) {
       // Generate an index table based on alphabetical order ignoring numbers
@@ -3532,6 +3534,7 @@ async function rendermenu(datas) {
     if (active_item < 0) {
       active_item = items_length;
     }
+    currentMenuActiveItem = active_item;
     var logo_load_start = active_item - Math.floor(visible_items/2);
     renderVisibleEntries();
     loadlogos(logo_load_start, visible_items, items_length, active_item);
@@ -3559,6 +3562,7 @@ async function rendermenu(datas) {
     if (active_item > items_length) {
       active_item = 0;
     }
+    currentMenuActiveItem = active_item;
     var logo_load_start = active_item - Math.floor(visible_items/2);
     renderVisibleEntries();
     loadlogos(logo_load_start, visible_items, items_length, active_item);

@@ -438,9 +438,9 @@ body.front-panel-open .login-panel {
     display: flex;
     align-items: center;
     min-width: 0;
-    width: calc(100% - 120px);
+    width: min(24vw, 430px);
     max-width: calc(100% - 120px);
-    flex: 0 1 calc(100% - 120px);
+    flex: 0 1 min(24vw, 430px);
     padding: 18px 20px;
     padding-right: 20px;
     border-radius: 16px;
@@ -453,18 +453,18 @@ body.front-panel-open .login-panel {
 
 #menu.selector-route-active .games-list {
     top: 78px;
-    right: 10px;
+    right: 0;
     left: auto;
-    width: min(33vw, 540px);
+    width: min(34vw, 560px);
     max-width: calc(100vw - 16px);
     height: calc(100vh - 92px);
     overflow-y: auto;
     display: flex;
     flex-direction: column;
-    justify-content: center;
+    justify-content: flex-start;
     align-items: flex-end;
     gap: 10px;
-    padding: 24px 0;
+    padding: 12px 0;
     scroll-padding-block: 40vh;
     visibility: visible;
 }
@@ -473,6 +473,12 @@ body.front-panel-open .login-panel {
     width: 100%;
     display: flex;
     justify-content: flex-end;
+}
+
+#menu.selector-route-active .selector-spacer {
+    min-height: 82px;
+    width: 100%;
+    pointer-events: none;
 }
 
 #menu.selector-route-active #games-list.hidden {
@@ -540,7 +546,7 @@ body.front-panel-open .login-panel {
 @media (max-width: 900px) {
   #menu.selector-route-active .games-list {
       width: calc(100vw - 26px);
-      right: 13px;
+      right: 0;
       top: 84px;
       height: calc(100vh - 98px);
     }

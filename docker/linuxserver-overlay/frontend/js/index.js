@@ -3946,18 +3946,22 @@ async function rendermenu(datas) {
           </div>\
         </div>';
   }
-  function renderVisibleEntries() {
-    $('#games-list').empty();
-    var logo_load_start = active_item - Math.floor(visible_items/2);
-    var rendered = {};
-    for (var slot = 0; slot < visible_items; slot++) {
-      var itemIndex = logo_load_start + slot;
-      if (items_length >= 0) {
-        itemIndex = ((itemIndex % (items_length + 1)) + (items_length + 1)) % (items_length + 1);
-      }
-      if (itemIndex >= 0 && itemIndex <= items_length && filteredNames[itemIndex] && !rendered[itemIndex]) {
-        rendered[itemIndex] = true;
-        $('#games-list').append(buildMenuEntry(filteredEntries[itemIndex], itemIndex));
+    function renderVisibleEntries() {
+      $('#games-list').empty();
+      var logo_load_start = active_item - Math.floor(visible_items/2);
+      var rendered = {};
+      for (var slot = 0; slot < visible_items; slot++) {
+        var itemIndex = logo_load_start + slot;
+        if (data.selectorMode && (itemIndex < 0 || itemIndex > items_length)) {
+          $('#games-list').append('<div class="selector-spacer" aria-hidden="true"></div>');
+          continue;
+        }
+        if (items_length >= 0) {
+          itemIndex = ((itemIndex % (items_length + 1)) + (items_length + 1)) % (items_length + 1);
+        }
+        if (itemIndex >= 0 && itemIndex <= items_length && filteredNames[itemIndex] && !rendered[itemIndex]) {
+          rendered[itemIndex] = true;
+          $('#games-list').append(buildMenuEntry(filteredEntries[itemIndex], itemIndex));
       }
     }
     refreshFavoriteButtons();

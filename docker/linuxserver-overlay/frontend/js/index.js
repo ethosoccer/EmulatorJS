@@ -4009,8 +4009,10 @@ async function rendermenu(datas) {
       count++;
     };
     // Render active list
-    for (var active_num of [...Array(visible_items).keys()]) {
-      $('#active-list').append('<div id="active' + active_num + '" class="menu-div"></div>');
+    if (!data.selectorMode) {
+      for (var active_num of [...Array(visible_items).keys()]) {
+        $('#active-list').append('<div id="active' + active_num + '" class="menu-div"></div>');
+      }
     }
     renderVisibleEntries();
     // Render initial
@@ -4022,12 +4024,19 @@ async function rendermenu(datas) {
         loadvideo(active_item);
       }
     } else {
-      $('.menu-img').css({'max-width': '90vw'});
-      $('.games-list').css({'width': '100vw'});
+      if (data.selectorMode) {
+        $('.menu-img').css({'max-width': '100%'});
+        $('.games-list').css({'width': 'min(46vw, 760px)'});
+      } else {
+        $('.menu-img').css({'max-width': '90vw'});
+        $('.games-list').css({'width': '100vw'});
+      }
     }
     var logo_load_start = active_item - Math.floor(visible_items/2);
-    loadlogos(logo_load_start, visible_items, items_length, active_item);
-    $('.menu-div').css({'height': image_height});
+    if (!data.selectorMode) {
+      loadlogos(logo_load_start, visible_items, items_length, active_item);
+      $('.menu-div').css({'height': image_height});
+    }
     $('.menu-img').css({'max-height': image_height});
     highlight(active_item);
   }
@@ -4055,7 +4064,9 @@ async function rendermenu(datas) {
     currentMenuActiveItem = active_item;
     var logo_load_start = active_item - Math.floor(visible_items/2);
     renderVisibleEntries();
-    loadlogos(logo_load_start, visible_items, items_length, active_item);
+    if (!data.selectorMode) {
+      loadlogos(logo_load_start, visible_items, items_length, active_item);
+    }
     // Background art and video
     if (portrait !== 0) {
       if (!data.selectorMode) {
@@ -4085,7 +4096,9 @@ async function rendermenu(datas) {
     currentMenuActiveItem = active_item;
     var logo_load_start = active_item - Math.floor(visible_items/2);
     renderVisibleEntries();
-    loadlogos(logo_load_start, visible_items, items_length, active_item);
+    if (!data.selectorMode) {
+      loadlogos(logo_load_start, visible_items, items_length, active_item);
+    }
     // Background art and video
     if (portrait !== 0) {
       if (!data.selectorMode) {

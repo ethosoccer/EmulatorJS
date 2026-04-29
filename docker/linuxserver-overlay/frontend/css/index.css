@@ -421,33 +421,34 @@ body.front-panel-open .login-panel {
 }
 
 #menu.selector-route-active .menu-wrap {
-  align-items: stretch;
-  min-height: 92px;
-  padding: 12px 14px;
-  border: 1px solid rgba(255, 255, 255, .14);
-  border-radius: 16px;
-  background: rgba(7, 10, 16, .72);
-  transition: background .16s ease, border-color .16s ease, box-shadow .16s ease;
+    align-items: stretch;
+    min-height: 92px;
+    padding: 12px 14px;
+    border: 1px solid transparent;
+    border-radius: 16px;
+    background: transparent;
+    box-shadow: none;
+    transition: background .16s ease, border-color .16s ease, box-shadow .16s ease;
 }
 
 #menu.selector-route-active .menu-wrap a {
-  display: flex;
-  align-items: center;
-  min-width: 0;
-  padding-right: 92px;
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    padding-right: 92px;
 }
 
 #menu.selector-route-active .menu-wrap:hover {
-  background: rgba(16, 22, 32, .62);
+    background: rgba(12, 18, 28, .22);
 }
 
 #menu.selector-route-active .games-list {
-  top: 78px;
-  right: 22px;
-  left: auto;
-  width: min(46vw, 760px);
-  max-width: calc(100vw - 32px);
-  visibility: visible;
+    top: 78px;
+    right: 24px;
+    left: auto;
+    width: min(38vw, 620px);
+    max-width: calc(100vw - 32px);
+    visibility: visible;
 }
 
 #menu.selector-route-active #games-list.hidden {
@@ -462,9 +463,9 @@ body.front-panel-open .login-panel {
 #menu.selector-route-active .controller-selected,
 #menu.selector-route-active .grow-mobile,
 #menu.selector-route-active .grow {
-  border-color: rgba(106, 222, 255, .85);
-  background: rgba(15, 28, 42, .9);
-  box-shadow: 0 0 0 2px rgba(106, 222, 255, .18), 0 18px 30px rgba(0, 0, 0, .28);
+    border-color: rgba(106, 222, 255, .85);
+    background: rgba(15, 28, 42, .9);
+    box-shadow: 0 0 0 2px rgba(106, 222, 255, .18), 0 18px 30px rgba(0, 0, 0, .28);
 }
 
 #menu.selector-route-active .grow-mobile,
@@ -504,8 +505,8 @@ body.front-panel-open .login-panel {
 
 @media (max-width: 900px) {
   #menu.selector-route-active .games-list {
-    width: calc(100vw - 26px);
-    right: 13px;
+      width: calc(100vw - 26px);
+      right: 13px;
     top: 84px;
   }
 

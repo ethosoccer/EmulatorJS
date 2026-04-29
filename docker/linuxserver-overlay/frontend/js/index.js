@@ -474,6 +474,15 @@ function getMenuRowControls(index) {
 }
 function syncMenuControllerSelection() {
   clearControllerSelectionClasses();
+  var $row = $('#h' + currentMenuActiveItem);
+  if ($row.length && $('#menu').hasClass('selector-route-active')) {
+    var rowElement = $row.get(0);
+    if (rowElement && typeof rowElement.scrollIntoView === 'function') {
+      try {
+        rowElement.scrollIntoView({block: 'center', inline: 'nearest'});
+      } catch (e) {}
+    }
+  }
   var $controls = getMenuRowControls(currentMenuActiveItem);
   if (!$controls.length) {
     return false;

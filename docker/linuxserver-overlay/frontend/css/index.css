@@ -423,6 +423,8 @@ body.front-panel-open .login-panel {
 #menu.selector-route-active .menu-wrap {
     justify-content: flex-end;
     align-items: center;
+    height: auto;
+    width: 100%;
     min-height: 82px;
     padding: 8px 0;
     border: none;
@@ -455,7 +457,22 @@ body.front-panel-open .login-panel {
     left: auto;
     width: min(33vw, 540px);
     max-width: calc(100vw - 16px);
+    height: calc(100vh - 92px);
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: flex-end;
+    gap: 10px;
+    padding: 24px 0;
+    scroll-padding-block: 40vh;
     visibility: visible;
+}
+
+#menu.selector-route-active .games-list > div {
+    width: 100%;
+    display: flex;
+    justify-content: flex-end;
 }
 
 #menu.selector-route-active #games-list.hidden {
@@ -525,6 +542,7 @@ body.front-panel-open .login-panel {
       width: calc(100vw - 26px);
       right: 13px;
       top: 84px;
+      height: calc(100vh - 98px);
     }
 
   #menu.selector-route-active .menu-wrap a {

@@ -261,6 +261,105 @@ function clickDomElement($element) {
   }
   return false;
 }
+function captureCurrentVisualState() {
+  return {
+    backgroundSrc: $('#background').attr('src') || '',
+    cornerSrc: $('#corner').attr('src') || '',
+    videoSrc: $('#bgvid source').attr('src') || '',
+    videoPosition: $('#bgvid').attr('style') || '',
+    videoVisible: $('#bgvid').css('display') !== 'none'
+  };
+}
+function storeSelectorVisualState() {
+  try {
+    sessionStorage.setItem('ejsSelectorVisualState', JSON.stringify(captureCurrentVisualState()));
+  } catch (e) {
+    console.log(e);
+  }
+}
+function loadSelectorVisualState() {
+  try {
+    return JSON.parse(sessionStorage.getItem('ejsSelectorVisualState') || 'null');
+  } catch (e) {
+    return null;
+  }
+}
+function applySelectorVisualState() {
+  var state = loadSelectorVisualState();
+  if (!state) {
+    return false;
+  }
+  if (state.backgroundSrc) {
+    $('#background').attr('src', state.backgroundSrc);
+  }
+  if (state.cornerSrc) {
+    $('#corner').attr('src', state.cornerSrc).show();
+  } else {
+    $('#corner').hide();
+  }
+  if (state.videoSrc) {
+    $('#bgvid source').attr('src', state.videoSrc);
+    $('#bgvid').attr('style', state.videoPosition || '');
+    try {
+      var video = $('#bgvid').get(0);
+      if (video) {
+        video.load();
+        video.muted = true;
+        video.play().catch(function() {});
+      }
+    } catch (e) {}
+    $('#bgvid').toggle(state.videoVisible !== false);
+  } else {
+    $('#bgvid').hide();
+  }
+  return true;
+}
+function serializeButtonData(source) {
+  var selected = source && source.jquery ? source : $(source);
+  if (!selected.length) {
+    return null;
+  }
+  var attrs = {};
+  if (selected.get(0) && selected.get(0).attributes) {
+    Array.prototype.forEach.call(selected.get(0).attributes, function(attr) {
+      attrs[attr.name] = attr.value;
+    });
+  }
+  return attrs;
+}
+function deserializeLaunchButton(attrs) {
+  if (!attrs) {
+    return null;
+  }
+  var temp = $('<button type="button">');
+  Object.keys(attrs).forEach(function(name) {
+    temp.attr(name, attrs[name]);
+  });
+  temp.attr('data-save-selection-ready', 'true');
+  return temp;
+}
+function savePendingLaunchSelection() {
+  try {
+    sessionStorage.setItem('ejsPendingLaunchSelection', JSON.stringify(pendingLaunchSelection || null));
+  } catch (e) {
+    console.log(e);
+  }
+}
+function loadPendingLaunchSelection() {
+  try {
+    pendingLaunchSelection = JSON.parse(sessionStorage.getItem('ejsPendingLaunchSelection') || 'null');
+  } catch (e) {
+    pendingLaunchSelection = null;
+  }
+}
+function clearPendingLaunchSelection() {
+  pendingLaunchSelection = null;
+  try {
+    sessionStorage.removeItem('ejsPendingLaunchSelection');
+  } catch (e) {
+    console.log(e);
+  }
+}
 function clearControllerSelectionClasses() {
   $('.controller-selected').removeClass('controller-selected');
 }
@@ -1691,6 +1790,7 @@ function restoreMenuState(snapshot) {
 function openSelectorMenu(config, activeItem) {
   selectorMenuStack.push(snapshotMenuState());
   saveSelectorStackState();
+  storeSelectorVisualState();
   var route = selectorRouteMap[config.selectorKind] || selectorRouteMap.variant;
   storeSelectorRouteState(route, config, activeItem);
   if (window.location.hash === route) {
@@ -1892,6 +1992,7 @@ function buildVariantSelectorConfig(entry, mode) {
     } else {
       item.type = 'game';
       item.multi_disc = Number(item.multi_disc || 0);
+      item.variant_choice = true;
     }
     item.has_logo = false;
     item.has_video = false;
@@ -2008,10 +2109,11 @@ async function openLaunchSavePickerForButton(button) {
     return;
   }
   pendingLaunchSelection = {
-    button: cloneLaunchButton(selected),
+    buttonAttrs: serializeButtonData(cloneLaunchButton(selected)),
     gameName: gameLabel,
     gameBase: gameBase
   };
+  savePendingLaunchSelection();
   if (!usePopupSelectors()) {
     closeSearchPanel();
     closeFavoritesPanel();
@@ -2042,17 +2144,23 @@ async function openLaunchSavePickerForButton(button) {
         return;
       }
       closeSavePanel();
-      if (pendingLaunchSelection && pendingLaunchSelection.button) {
-        launch(pendingLaunchSelection.button);
+      if (pendingLaunchSelection && pendingLaunchSelection.buttonAttrs) {
+        var launchButton = deserializeLaunchButton(pendingLaunchSelection.buttonAttrs);
+        if (launchButton) {
+          launch(launchButton);
+        }
       }
-      pendingLaunchSelection = null;
+      clearPendingLaunchSelection();
     },
     onSkip: function() {
       closeSavePanel();
-      if (pendingLaunchSelection && pendingLaunchSelection.button) {
-        launch(pendingLaunchSelection.button);
+      if (pendingLaunchSelection && pendingLaunchSelection.buttonAttrs) {
+        var launchButton = deserializeLaunchButton(pendingLaunchSelection.buttonAttrs);
+        if (launchButton) {
+          launch(launchButton);
+        }
       }
-      pendingLaunchSelection = null;
+      clearPendingLaunchSelection();
     }
   });
   focusFrontPanel('#save-panel', '.search-result, button');
@@ -3361,11 +3469,13 @@ function launch(active_item) {
   var groupedEntry = !isNaN(menuIndex) ? menuEntries[menuIndex] : null;
   if (type == 'selector-action') {
     if (selectorAction === 'skip-save') {
-      closeSelectorMenu();
-      if (pendingLaunchSelection && pendingLaunchSelection.button) {
-        launch(pendingLaunchSelection.button);
+      if (pendingLaunchSelection && pendingLaunchSelection.buttonAttrs) {
+        var skipLaunchButton = deserializeLaunchButton(pendingLaunchSelection.buttonAttrs);
+        if (skipLaunchButton) {
+          launch(skipLaunchButton);
+        }
       }
-      pendingLaunchSelection = null;
+      clearPendingLaunchSelection();
     } else if (selectorAction === 'back') {
       closeSelectorMenu();
     }
@@ -3377,11 +3487,13 @@ function launch(active_item) {
         alert('Unable to restore that save.');
         return;
       }
-      closeSelectorMenu();
-      if (pendingLaunchSelection && pendingLaunchSelection.button) {
-        launch(pendingLaunchSelection.button);
+      if (pendingLaunchSelection && pendingLaunchSelection.buttonAttrs) {
+        var launchButton = deserializeLaunchButton(pendingLaunchSelection.buttonAttrs);
+        if (launchButton) {
+          launch(launchButton);
+        }
       }
-      pendingLaunchSelection = null;
+      clearPendingLaunchSelection();
     });
     return;
   }
@@ -3666,8 +3778,8 @@ async function rendermenu(datas) {
   var portrait = window.orientation;
   if (data.selectorMode) {
     portrait = 0;
-    silenceBackgroundMedia(true);
   }
+  $('#menu').toggleClass('selector-route-active', !!data.selectorMode);
   $('#menu').data('config', data);
   var root = data.root;
   $('#menu').data('root', root);
@@ -3781,6 +3893,9 @@ async function rendermenu(datas) {
         jsdata += 'data-' + extraKey + '="' + escapeHtml(item[extraKey]) + '" ';
       }
     });
+    if (item.hasOwnProperty('variant_choice')) {
+      jsdata += 'data-variant-choice="' + escapeHtml(item.variant_choice) + '" ';
+    }
     var itemType = item.hasOwnProperty('type') ? item.type : data.defaults.type;
     var itemPath = item.hasOwnProperty('path') ? item.path : data.defaults.path;
     var itemTitle = data.title || itemPath || 'Games';
@@ -3798,10 +3913,20 @@ async function rendermenu(datas) {
       var favoriteButton = '';
       var saveButton = '';
       var romDownloadButton = '';
+      var showSelectorButtons = !data.selectorMode || data.selectorKind === 'variant';
+      var showSaveButton = !data.selectorMode;
+      var showDownloadButton = !data.selectorMode || (data.selectorKind === 'variant' && data.selectorVariantMode !== 'favorite');
+      var showFavoriteButton = !data.selectorMode || (data.selectorKind === 'variant' && data.selectorVariantMode !== 'download');
       if (itemType == 'game') {
-        saveButton = '<button class="save-toggle hidden" type="button" data-save-base="' + escapeHtml(saveBase) + '" data-save-name="' + escapeHtml(favoriteName) + '" onclick="openGameSaves(event, this.getAttribute(\'data-save-name\'), this.getAttribute(\'data-save-base\'))" aria-label="Download saves" title="No local saves found">&#128190;</button>';
-        romDownloadButton = '<button class="rom-download-toggle" type="button" data-menu-index="' + count + '" data-variant-count="' + (entry.variantCount || 1) + '" data-rom-path="' + escapeHtml(itemPath) + '" data-rom-name="' + escapeHtml(romName) + '" data-rom-extension="' + escapeHtml(item.hasOwnProperty('rom_extension') ? item.rom_extension : data.defaults.rom_extension || '') + '" onclick="handleRomDownload(event, this)" aria-label="Download ROM" title="Download ROM">&#10515;</button>';
-        favoriteButton = '<button class="favorite-toggle" type="button" data-menu-index="' + count + '" data-favorite-id="' + escapeHtml(favoriteId) + '" data-favorite-name="' + escapeHtml(favoriteName) + '" data-favorite-exact-name="' + escapeHtml(romName) + '" data-favorite-root="' + escapeHtml(root) + '" data-favorite-title="' + escapeHtml(itemTitle) + '" data-favorite-index="' + entry.originalIndex + '" data-favorite-variant-count="' + (entry.variantCount || 1) + '" onclick="toggleFavorite(event, this.getAttribute(\'data-favorite-id\'), this)" aria-label="Toggle favorite" title="Add to favorites">&hearts;</button>';
+        if (showSaveButton) {
+          saveButton = '<button class="save-toggle hidden" type="button" data-save-base="' + escapeHtml(saveBase) + '" data-save-name="' + escapeHtml(favoriteName) + '" onclick="openGameSaves(event, this.getAttribute(\'data-save-name\'), this.getAttribute(\'data-save-base\'))" aria-label="Download saves" title="No local saves found">&#128190;</button>';
+        }
+        if (showDownloadButton && showSelectorButtons) {
+          romDownloadButton = '<button class="rom-download-toggle" type="button" data-menu-index="' + count + '" data-variant-count="' + (entry.variantCount || 1) + '" data-rom-path="' + escapeHtml(itemPath) + '" data-rom-name="' + escapeHtml(romName) + '" data-rom-extension="' + escapeHtml(item.hasOwnProperty('rom_extension') ? item.rom_extension : data.defaults.rom_extension || '') + '" onclick="handleRomDownload(event, this)" aria-label="Download ROM" title="Download ROM">&#10515;</button>';
+        }
+        if (showFavoriteButton && showSelectorButtons) {
+          favoriteButton = '<button class="favorite-toggle" type="button" data-menu-index="' + count + '" data-favorite-id="' + escapeHtml(favoriteId) + '" data-favorite-name="' + escapeHtml(favoriteName) + '" data-favorite-exact-name="' + escapeHtml(romName) + '" data-favorite-root="' + escapeHtml(root) + '" data-favorite-title="' + escapeHtml(itemTitle) + '" data-favorite-index="' + entry.originalIndex + '" data-favorite-variant-count="' + (entry.variantCount || 1) + '" onclick="toggleFavorite(event, this.getAttribute(\'data-favorite-id\'), this)" aria-label="Toggle favorite" title="Add to favorites">&hearts;</button>';
+        }
       }
       return '\
         <div id="m' + count + '">\
@@ -4406,6 +4531,7 @@ window.onload = async function() {
   updateLoginState();
   await loadPublicSettings();
   loadSelectorStackState();
+  loadPendingLaunchSelection();
   $('#game-search').on('input', debounce(runGameSearch, 150));
   $('#console-filter').on('change', runGameSearch);
   $('#art-filter').on('change', runGameSearch);
@@ -4415,6 +4541,7 @@ window.onload = async function() {
     var restoreState = loadMenuRestoreState();
     if (isSelectorRoute(window.location.hash) && selectorRouteState && selectorRouteState.route === window.location.hash && selectorRouteState.config) {
       clearMenuRestoreState();
+      applySelectorVisualState();
       rendermenu([selectorRouteState.config, selectorRouteState.activeItem || 0]);
     } else if (restoreState && restoreState.config) {
       clearMenuRestoreState();

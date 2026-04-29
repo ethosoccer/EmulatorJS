@@ -420,6 +420,52 @@ body.front-panel-open .login-panel {
   box-shadow: 0 0 0 2px rgba(106, 222, 255, .22);
 }
 
+#menu.selector-route-active .menu-wrap {
+  align-items: stretch;
+  min-height: 92px;
+  padding: 10px 16px;
+  border: 1px solid rgba(255, 255, 255, .14);
+  border-radius: 16px;
+  background: rgba(7, 10, 16, .48);
+  transition: background .16s ease, border-color .16s ease, box-shadow .16s ease;
+}
+
+#menu.selector-route-active .menu-wrap a {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+#menu.selector-route-active .menu-wrap:hover {
+  background: rgba(16, 22, 32, .62);
+}
+
+#menu.selector-route-active .controller-selected,
+#menu.selector-route-active .grow-mobile,
+#menu.selector-route-active .grow {
+  border-color: rgba(106, 222, 255, .85);
+  background: rgba(15, 28, 42, .9);
+  box-shadow: 0 0 0 2px rgba(106, 222, 255, .18), 0 18px 30px rgba(0, 0, 0, .28);
+}
+
+#menu.selector-route-active .grow-mobile,
+#menu.selector-route-active .grow {
+  animation: none;
+  transform: none;
+}
+
+#menu.selector-route-active .menu-img {
+  font-size: clamp(24px, 2.6vw, 42px);
+}
+
+#menu.selector-route-active .menu-subtitle {
+  font-size: clamp(14px, 1.15vw, 17px);
+}
+
+#menu.selector-route-active .menu-detail {
+  font-size: clamp(13px, 1vw, 15px);
+}
+
 .panel-icon-button {
   font-size: 17px;
 }

@@ -447,6 +447,11 @@ body.front-panel-open .login-panel {
   left: auto;
   width: min(46vw, 760px);
   max-width: calc(100vw - 32px);
+  visibility: visible;
+}
+
+#menu.selector-route-active #games-list.hidden {
+  visibility: visible;
 }
 
 #menu.selector-route-active #active-list,

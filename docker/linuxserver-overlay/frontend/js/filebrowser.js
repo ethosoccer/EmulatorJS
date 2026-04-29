@@ -606,6 +606,7 @@ async function loadAdminSettings() {
   let json = await res.json();
   if (json.status == 'success') {
     $('#requireMainLogin').prop('checked', json.requireLogin === true);
+    $('#usePopupSelectors').prop('checked', json.selectorStyle === 'popup');
     $('#passwordResetWebhook').val(json.passwordResetWebhook || '');
   }
 }
@@ -614,6 +615,7 @@ async function saveAdminSettings() {
   let loginSettings = postSettings;
   loginSettings.body = JSON.stringify(adminProfileBody('setsettings', {
     requireLogin: $('#requireMainLogin').prop('checked'),
+    selectorStyle: $('#usePopupSelectors').prop('checked') ? 'popup' : 'menu',
     passwordResetWebhook: $('#passwordResetWebhook').val()
   }));
   let res = await fetch(endPoint, loginSettings);

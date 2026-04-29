@@ -40,6 +40,8 @@ var frontPanelNavState = {selector: null, row: 0, col: 0};
 var menuActionIndex = 0;
 var currentMenuActiveItem = 0;
 var requireMainLogin = false;
+var selectorStyle = 'menu';
+var selectorMenuStack = [];
 var isSafari = navigator.vendor && navigator.vendor.indexOf('Apple') > -1 &&
                navigator.userAgent &&
                navigator.userAgent.indexOf('CriOS') == -1 &&
@@ -1590,6 +1592,41 @@ function closeVariantPanel() {
 function closeInfoPanel() {
   $('#info-panel').addClass('hidden');
 }
+function usePopupSelectors() {
+  return selectorStyle === 'popup';
+}
+function snapshotMenuState() {
+  return {
+    config: $('#menu').data('config') || null,
+    activeItem: currentMenuActiveItem || 0,
+    filter: $('#console-list-search').val() || '',
+    menuActionIndex: menuActionIndex || 0
+  };
+}
+function restoreMenuState(snapshot) {
+  if (!snapshot || !snapshot.config) {
+    return false;
+  }
+  rendermenu([snapshot.config, snapshot.activeItem || 0]);
+  setTimeout(function() {
+    $('#console-list-search').val(snapshot.filter || '');
+    $('#console-list-search').trigger('input');
+    currentMenuActiveItem = snapshot.activeItem || 0;
+    menuActionIndex = snapshot.menuActionIndex || 0;
+    syncMenuControllerSelection();
+  }, 0);
+  return true;
+}
+function openSelectorMenu(config, activeItem) {
+  selectorMenuStack.push(snapshotMenuState());
+  rendermenu([config, typeof activeItem === 'number' ? activeItem : 0]);
+}
+function closeSelectorMenu() {
+  var snapshot = selectorMenuStack.pop();
+  if (!restoreMenuState(snapshot)) {
+    window.location.href = '#main';
+  }
+}
 function variantCodeSummary(variant) {
   var lines = [];
   (variant.codeTooltips || []).forEach(function(item) {
@@ -1643,7 +1680,7 @@ function handleRomDownload(event, button) {
   var entries = $('#menu').data('menuEntries') || [];
   var entry = !isNaN(menuIndex) ? entries[menuIndex] : null;
   if (variantCount > 1 && entry && entry.variants) {
-    openVariantPanel(entry, {mode: 'download'});
+    openVariantSelector(entry, {mode: 'download'});
     return;
   }
   downloadRom(event, button);
@@ -1732,6 +1769,118 @@ function renderVariantPanel() {
   }
   $('#variant-panel').removeClass('hidden');
 }
+function variantSelectorSubtitle(variant) {
+  var parts = [];
+  if (variant.regionLabel) {
+    parts.push(variant.regionLabel);
+  }
+  if (variant.versionLabel) {
+    parts.push(variant.versionLabel);
+  }
+  if (variant.extraLabel) {
+    parts.push(variant.extraLabel);
+  }
+  return parts.join(' | ');
+}
+function variantSelectorDetails(variant) {
+  return (variant.codeTooltips || []).map(function(item) {
+    return item.description;
+  }).filter(Boolean).join(' | ');
+}
+function buildVariantSelectorConfig(entry, mode) {
+  var currentConfig = $('#menu').data('config') || {};
+  var items = {};
+  entry.variants.forEach(function(variant, index) {
+    var key = variant.name + ' #' + index;
+    var item = Object.assign({}, variant.resolved);
+    if (mode === 'favorite') {
+      item.type = 'selector-favorite';
+      item.selector_favorite_id = variant.id;
+      item.selector_favorite_name = variant.displayName || variant.name;
+      item.selector_favorite_exact_name = variant.name;
+      item.selector_favorite_root = variant.root || entry.root || '';
+      item.selector_favorite_title = variant.title || entry.title || '';
+      item.selector_favorite_index = variant.index;
+    } else if (mode === 'download') {
+      item.type = 'selector-download';
+      item.selector_rom_path = variant.path || '';
+      item.selector_rom_name = variant.name || '';
+      item.selector_rom_extension = variant.extension || '';
+    } else {
+      item.type = 'game';
+      item.multi_disc = Number(item.multi_disc || 0);
+    }
+    item.has_logo = false;
+    item.has_video = false;
+    item.selector_subtitle = variantSelectorSubtitle(variant);
+    item.selector_details = variantSelectorDetails(variant);
+    item.selector_display_name = variant.displayName || variant.name;
+    item.selector_original_index = variant.index;
+    items[key] = item;
+  });
+  return {
+    title: entry.displayName || entry.name,
+    root: entry.root || $('#menu').data('root') || 'main',
+    parent: '',
+    defaults: Object.assign({}, currentConfig.defaults || {}),
+    display_items: currentConfig.display_items || 7,
+    items: items,
+    selectorMode: true,
+    selectorKind: 'variant',
+    selectorVariantMode: mode || 'launch'
+  };
+}
+function buildSaveSelectorConfig(gameLabel, saves, originalIndex) {
+  var currentConfig = $('#menu').data('config') || {};
+  var items = {};
+  items['Launch Without Restoring'] = {
+    type: 'selector-action',
+    selector_action: 'skip-save',
+    has_logo: false,
+    has_video: false,
+    selector_subtitle: 'Start the game without restoring a previous save',
+    selector_details: '',
+    selector_original_index: originalIndex
+  };
+  saves.forEach(function(save, index) {
+    var item = {
+      type: 'selector-save',
+      selector_save_id: save.id,
+      has_logo: false,
+      has_video: false,
+      selector_subtitle: saveVersionSummary(save),
+      selector_details: save.notes || '',
+      selector_display_name: save.name,
+      selector_original_index: originalIndex
+    };
+    items[(save.name || 'Save') + ' #' + index] = item;
+  });
+  return {
+    title: 'Launch ' + safeDecodeDisplayName(gameLabel),
+    root: $('#menu').data('root') || 'main',
+    parent: '',
+    defaults: Object.assign({}, currentConfig.defaults || {}),
+    display_items: currentConfig.display_items || 7,
+    items: items,
+    selectorMode: true,
+    selectorKind: 'save'
+  };
+}
+function openVariantSelector(entry, options) {
+  if (!entry || !entry.variants || entry.variants.length <= 1) {
+    return;
+  }
+  if (usePopupSelectors()) {
+    openVariantPanel(entry, options);
+    return;
+  }
+  closeSearchPanel();
+  closeFavoritesPanel();
+  closeLoginPanel();
+  closeSavePanel();
+  closeInfoPanel();
+  openSelectorMenu(buildVariantSelectorConfig(entry, options && options.mode || 'launch'), 0);
+}
 function openVariantPanel(entry, options) {
   if (!entry || !entry.variants || entry.variants.length <= 1) {
     return;
@@ -1780,6 +1929,15 @@ async function openLaunchSavePickerForButton(button) {
     gameName: gameLabel,
     gameBase: gameBase
   };
+  if (!usePopupSelectors()) {
+    closeSearchPanel();
+    closeFavoritesPanel();
+    closeLoginPanel();
+    closeVariantPanel();
+    closeInfoPanel();
+    openSelectorMenu(buildSaveSelectorConfig(gameLabel, saves, Number(selected.attr('data-original-index') || selectedIndex || 0)), 0);
+    return;
+  }
   closeSearchPanel();
   closeFavoritesPanel();
   closeLoginPanel();
@@ -2044,6 +2202,7 @@ async function loadPublicSettings() {
     var res = await profileRequest({type:'publicsettings'});
     var json = await res.json();
     requireMainLogin = json.status == 'success' && json.requireLogin === true;
+    selectorStyle = json.status == 'success' && json.selectorStyle === 'popup' ? 'popup' : 'menu';
   } catch(e) {
     console.log(e);
   }
@@ -2359,7 +2518,7 @@ function toggleFavorite(event, favoriteId, button) {
   var entries = $('#menu').data('menuEntries') || [];
   var entry = !isNaN(menuIndex) ? entries[menuIndex] : null;
   if (variantCount > 1 && !$button.attr('data-favorite-variant-choice') && entry && entry.variants) {
-    openVariantPanel(entry, {mode: 'favorite'});
+    openVariantSelector(entry, {mode: 'favorite'});
     return;
   }
   if (!favoriteId || favoriteId === 'undefined') {
@@ -2754,7 +2913,7 @@ function groupConsoleItems(consoleConfig, consoleRoot) {
   var groups = {};
   var entries = [];
   var index = 0;
-  var allowGrouping = consoleRoot !== 'main' && !(consoleConfig.hasOwnProperty('multi_name') && hasUsableValue(consoleConfig.multi_name));
+  var allowGrouping = consoleConfig.selectorMode !== true && consoleRoot !== 'main' && !(consoleConfig.hasOwnProperty('multi_name') && hasUsableValue(consoleConfig.multi_name));
   Object.keys(consoleConfig.items).forEach(function(name) {
     var item = consoleConfig.items[name];
     if ((item.hasOwnProperty('cloneof')) && (consoleConfig.items.hasOwnProperty(item.cloneof))) {
@@ -2785,21 +2944,23 @@ function groupConsoleItems(consoleConfig, consoleRoot) {
       codeTooltips: parsed.codeTooltips,
       searchText: parsed.searchText
     };
-    if (!allowGrouping || itemType !== 'game') {
-      entries.push({
-        id: variant.id,
-        key: 'single:' + name,
-        name: name,
-        displayName: name,
-        root: consoleRoot,
-        title: consoleConfig.title || consoleRoot,
-        originalIndex: index,
-        representative: variant,
-        variants: [variant],
-        variantCount: 1,
-        searchText: variant.searchText,
-        itemType: itemType
-      });
+      if (!allowGrouping || itemType !== 'game') {
+        entries.push({
+          id: variant.id,
+          key: 'single:' + name,
+          name: name,
+          displayName: resolved.selector_display_name || name,
+          root: consoleRoot,
+          title: consoleConfig.title || consoleRoot,
+          originalIndex: index,
+          representative: variant,
+          variants: [variant],
+          variantCount: 1,
+          selectorSubtitle: resolved.selector_subtitle || '',
+          selectorDetails: resolved.selector_details || '',
+          searchText: variant.searchText,
+          itemType: itemType
+        });
       index++;
       return;
     }
@@ -3011,6 +3172,10 @@ function clearConsoleListFilter() {
   $('#console-list-search').val('').trigger('input');
 }
 function goBackToMain() {
+  if (selectorMenuStack.length) {
+    closeSelectorMenu();
+    return;
+  }
   closeSearchPanel();
   closeFavoritesPanel();
   closeLoginPanel();
@@ -3024,7 +3189,7 @@ function goBackToMain() {
   }
 }
 function updateConsoleBackButton(root, data) {
-  var showBack = root !== 'main' && !(data.hasOwnProperty('multi_name') && hasUsableValue(data.multi_name));
+  var showBack = selectorMenuStack.length > 0 || (root !== 'main' && !(data.hasOwnProperty('multi_name') && hasUsableValue(data.multi_name)));
   $('#console-back-button').toggleClass('hidden', !showBack);
 }
 // Load and play video
@@ -3102,14 +3267,63 @@ function launch(active_item) {
   var name = selected.data('name');
   var displayName = selected.data('group-display-name') || selected.data('display-name') || name;
   var type = selected.data('type');
+  var selectorAction = selected.attr('data-selector_action') || selected.attr('data-selector-action') || '';
+  var selectorSaveId = selected.attr('data-selector_save_id') || selected.attr('data-selector-save-id') || '';
+  var selectorFavoriteId = selected.attr('data-selector_favorite_id') || selected.attr('data-selector-favorite-id') || '';
   var multi = selected.data('multi_disc');
   var root = $('#menu').data('root');
   var originalActiveItem = Number(selected.attr('data-original-index') || selectedIndex);
   var menuEntries = $('#menu').data('menuEntries') || [];
   var menuIndex = Number(selected.attr('data-menu-index'));
   var groupedEntry = !isNaN(menuIndex) ? menuEntries[menuIndex] : null;
+  if (type == 'selector-action') {
+    if (selectorAction === 'skip-save') {
+      closeSelectorMenu();
+      if (pendingLaunchSelection && pendingLaunchSelection.button) {
+        launch(pendingLaunchSelection.button);
+      }
+      pendingLaunchSelection = null;
+    } else if (selectorAction === 'back') {
+      closeSelectorMenu();
+    }
+    return;
+  }
+  if (type == 'selector-save' && selectorSaveId) {
+    restoreSaveForLaunch(selectorSaveId).then(function(restored) {
+      if (!restored) {
+        alert('Unable to restore that save.');
+        return;
+      }
+      closeSelectorMenu();
+      if (pendingLaunchSelection && pendingLaunchSelection.button) {
+        launch(pendingLaunchSelection.button);
+      }
+      pendingLaunchSelection = null;
+    });
+    return;
+  }
+  if (type == 'selector-favorite' && selectorFavoriteId) {
+    toggleFavorite(null, selectorFavoriteId, selected.get(0));
+    closeSelectorMenu();
+    return;
+  }
+  if (type == 'selector-download') {
+    downloadRom({
+      preventDefault: function() {},
+      stopPropagation: function() {}
+    }, {
+      getAttribute: function(attribute) {
+        if (attribute === 'data-rom-path') return selected.attr('data-selector_rom_path') || selected.attr('data-selector-rom-path');
+        if (attribute === 'data-rom-name') return selected.attr('data-selector_rom_name') || selected.attr('data-selector-rom-name');
+        if (attribute === 'data-rom-extension') return selected.attr('data-selector_rom_extension') || selected.attr('data-selector-rom-extension');
+        return '';
+      }
+    });
+    closeSelectorMenu();
+    return;
+  }
   if (selected.data('variant-choice') !== true && groupedEntry && groupedEntry.variantCount > 1 && type == 'game') {
-    openVariantPanel(groupedEntry);
+    openVariantSelector(groupedEntry);
     return;
   }
   if (selected.data('close-variant-panel') === true) {
@@ -3417,7 +3631,7 @@ async function rendermenu(datas) {
   var letters = "abcdefghijklmnopqrstuvwxyz".split("");
   var filteredNames = filteredEntries.map(function(entry) { return entry.displayName; });
   function renderConsoleFilterState(totalCount, filteredCount, query) {
-    var showFilter = root !== 'main' && !(data.hasOwnProperty('multi_name') && hasUsableValue(data.multi_name));
+    var showFilter = !data.selectorMode && root !== 'main' && !(data.hasOwnProperty('multi_name') && hasUsableValue(data.multi_name));
     $('#console-list-tools').toggleClass('hidden', !showFilter);
     $('#menu').toggleClass('console-filter-active', showFilter);
     if (!showFilter) {
@@ -3435,6 +3649,8 @@ async function rendermenu(datas) {
     var item = entry.representative.resolved;
     var name = entry.representative.name;
     var displayName = entry.displayName || name;
+    var selectorSubtitle = item.selector_subtitle || entry.selectorSubtitle || '';
+    var selectorDetails = item.selector_details || entry.selectorDetails || '';
     var variantTooltip = variantTooltipText(entry.representative);
     var launchTooltip = variantTooltip;
     if (entry.variantCount > 1) {
@@ -3454,6 +3670,8 @@ async function rendermenu(datas) {
     };
     if (has_logo == true) {
       var logo_html = '<img class="menu-img" alt="'+ displayName +'" title="'+ displayName +'">';
+    } else if (selectorSubtitle || selectorDetails) {
+      var logo_html = '<div class="menu-text"><p class="menu-img">' + escapeHtml(displayName) + '</p><p class="menu-subtitle">' + escapeHtml(selectorSubtitle) + '</p>' + (selectorDetails ? '<p class="menu-detail">' + escapeHtml(selectorDetails) + '</p>' : '') + '</div>';
     } else {
       var logo_html = '<p class="menu-img">' + escapeHtml(displayName) + '</p>';
     };
@@ -3463,7 +3681,6 @@ async function rendermenu(datas) {
     jsdata += 'data-display-name="' + escapeHtml(displayName) + '" ';
     jsdata += 'data-group-display-name="' + escapeHtml(displayName) + '" ';
     jsdata += 'data-menu-index="' + count + '" ';
-    jsdata += 'data-original-index="' + entry.originalIndex + '" ';
     jsdata += 'data-variant-count="' + (entry.variantCount || 1) + '" ';
     for (var key of defaultKeys) {
       if (item.hasOwnProperty(key)) {
@@ -3472,9 +3689,22 @@ async function rendermenu(datas) {
         jsdata += 'data-' + key + '="' + data.defaults[key] + '" ';
       };
     };
+    ['selector_action', 'selector_save_id', 'selector_favorite_id', 'selector_favorite_name', 'selector_favorite_exact_name', 'selector_favorite_root', 'selector_favorite_title', 'selector_favorite_index', 'selector_rom_path', 'selector_rom_name', 'selector_rom_extension'].forEach(function(extraKey) {
+      if (item.hasOwnProperty(extraKey)) {
+        jsdata += 'data-' + extraKey + '="' + escapeHtml(item[extraKey]) + '" ';
+      }
+    });
     var itemType = item.hasOwnProperty('type') ? item.type : data.defaults.type;
     var itemPath = item.hasOwnProperty('path') ? item.path : data.defaults.path;
     var itemTitle = data.title || itemPath || 'Games';
+    if (item.hasOwnProperty('selector_favorite_id')) {
+      jsdata += 'data-favorite-id="' + escapeHtml(item.selector_favorite_id) + '" ';
+      jsdata += 'data-favorite-name="' + escapeHtml(item.selector_favorite_name || displayName) + '" ';
+      jsdata += 'data-favorite-exact-name="' + escapeHtml(item.selector_favorite_exact_name || name) + '" ';
+      jsdata += 'data-favorite-root="' + escapeHtml(item.selector_favorite_root || root) + '" ';
+      jsdata += 'data-favorite-title="' + escapeHtml(item.selector_favorite_title || itemTitle) + '" ';
+      jsdata += 'data-favorite-index="' + escapeHtml(item.selector_favorite_index || entry.originalIndex || 0) + '" ';
+    }
     var favoriteName = cleanGameName(displayName, itemPath + '::' + displayName);
     var favoriteId = entry.id || (itemPath + '::' + romName);
     var saveBase = saveBasename(romName + (item.hasOwnProperty('rom_extension') ? item.rom_extension : data.defaults.rom_extension || ''));
@@ -3489,7 +3719,7 @@ async function rendermenu(datas) {
       return '\
         <div id="m' + count + '">\
           <div id="h' + count + '" class="menu-wrap ' + shrink + '">\
-            <a onclick="launch(this)" id="i' + count + '" title="' + escapeHtml(launchTooltip || displayName) + '" ' + jsdata + '>\
+            <a onclick="launch(this)" id="i' + count + '" title="' + escapeHtml(launchTooltip || displayName) + '" data-original-index="' + escapeHtml(item.selector_original_index || entry.originalIndex) + '" ' + jsdata + '>\
               ' + logo_html + '\
             </a>' + saveButton + romDownloadButton + favoriteButton + '\
           </div>\
@@ -3575,8 +3805,10 @@ async function rendermenu(datas) {
     if (portrait !== 0) {
       $('.menu-img').css({'max-width': '30vw'});
       $('.games-list').css({'width': '40vw'});
-      loadart(active_item);
-      loadvideo(active_item);
+      if (!data.selectorMode) {
+        loadart(active_item);
+        loadvideo(active_item);
+      }
     } else {
       $('.menu-img').css({'max-width': '90vw'});
       $('.games-list').css({'width': '100vw'});
@@ -3614,8 +3846,10 @@ async function rendermenu(datas) {
     loadlogos(logo_load_start, visible_items, items_length, active_item);
     // Background art and video
     if (portrait !== 0) {
-      loadart(active_item);
-      loadvideo(active_item);
+      if (!data.selectorMode) {
+        loadart(active_item);
+        loadvideo(active_item);
+      }
     }
     highlight(active_item);
   };
@@ -3642,8 +3876,10 @@ async function rendermenu(datas) {
     loadlogos(logo_load_start, visible_items, items_length, active_item);
     // Background art and video
     if (portrait !== 0) {
-      loadart(active_item);
-      loadvideo(active_item);
+      if (!data.selectorMode) {
+        loadart(active_item);
+        loadvideo(active_item);
+      }
     }
     highlight(active_item);
   };
@@ -3708,7 +3944,11 @@ async function rendermenu(datas) {
     }
     // Go to Parent
     if (event.key == 'Escape' || event.key == 'Backspace') {
-      window.location.href = '#' + parent;
+      if (selectorMenuStack.length) {
+        closeSelectorMenu();
+      } else {
+        window.location.href = '#' + parent;
+      }
     }
     // Jump Down
     if (event.key == 'PageDown') {
@@ -3986,7 +4226,11 @@ async function rendermenu(datas) {
         activateCurrentMenuControl();
         return;
       } else if (gp.buttons[1].pressed && parent && '#' + parent != window.location.hash) {
-        window.location.href = '#' + parent;
+        if (selectorMenuStack.length) {
+          closeSelectorMenu();
+        } else {
+          window.location.href = '#' + parent;
+        }
         return;
       } else if ((buttonsMissing([],[16])) && (gp.buttons[16].pressed && window.location.hash != '#main')) {
         window.location.href = '#main';
@@ -4000,7 +4244,11 @@ async function rendermenu(datas) {
       gpUpdate = gp.timestamp
       try {
         if (!gameStarted && gp.buttons[1].pressed && parent) {
-          window.location.href = '#' + parent;
+          if (selectorMenuStack.length) {
+            closeSelectorMenu();
+          } else {
+            window.location.href = '#' + parent;
+          }
           return;
         }
       } catch (e) {

@@ -165,6 +165,25 @@ body.profile-required .login-panel {
   font-size: 4vh;
 }
 
+.menu-text {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.menu-subtitle,
+.menu-detail {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.78);
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 1.85vh;
+  line-height: 1.25;
+}
+
+.menu-detail {
+  color: rgba(106, 222, 255, 0.95);
+}
+
 #background {
   position: fixed;
   left: 0;

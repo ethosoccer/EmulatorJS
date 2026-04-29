@@ -582,6 +582,7 @@ async function authenticateProfile(user, pass) {
 function defaultSettings() {
   return {
     requireLogin: false,
+    selectorStyle: 'menu',
     passwordResetWebhook: '',
     localLogsEnabled: true,
     localLogRetentionDays: 90,

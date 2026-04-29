@@ -42,6 +42,10 @@ var currentMenuActiveItem = 0;
 var requireMainLogin = false;
 var selectorStyle = 'menu';
 var selectorMenuStack = [];
+var selectorRouteMap = {
+  variant: '#selector-game',
+  save: '#selector-save'
+};
 var isSafari = navigator.vendor && navigator.vendor.indexOf('Apple') > -1 &&
                navigator.userAgent &&
                navigator.userAgent.indexOf('CriOS') == -1 &&
@@ -1595,8 +1599,75 @@ function closeInfoPanel() {
 function usePopupSelectors() {
   return selectorStyle === 'popup';
 }
+function saveSelectorStackState() {
+  try {
+    sessionStorage.setItem('ejsSelectorMenuStack', JSON.stringify(selectorMenuStack));
+  } catch (e) {
+    console.log(e);
+  }
+}
+function loadSelectorStackState() {
+  try {
+    selectorMenuStack = JSON.parse(sessionStorage.getItem('ejsSelectorMenuStack') || '[]');
+    if (!Array.isArray(selectorMenuStack)) {
+      selectorMenuStack = [];
+    }
+  } catch (e) {
+    selectorMenuStack = [];
+  }
+}
+function storeSelectorRouteState(route, config, activeItem) {
+  try {
+    sessionStorage.setItem('ejsSelectorRouteState', JSON.stringify({
+      route: route,
+      config: config,
+      activeItem: typeof activeItem === 'number' ? activeItem : 0
+    }));
+  } catch (e) {
+    console.log(e);
+  }
+}
+function loadSelectorRouteState() {
+  try {
+    return JSON.parse(sessionStorage.getItem('ejsSelectorRouteState') || 'null');
+  } catch (e) {
+    return null;
+  }
+}
+function clearSelectorRouteState() {
+  try {
+    sessionStorage.removeItem('ejsSelectorRouteState');
+  } catch (e) {
+    console.log(e);
+  }
+}
+function storeMenuRestoreState(snapshot) {
+  try {
+    sessionStorage.setItem('ejsMenuRestoreState', JSON.stringify(snapshot || null));
+  } catch (e) {
+    console.log(e);
+  }
+}
+function loadMenuRestoreState() {
+  try {
+    return JSON.parse(sessionStorage.getItem('ejsMenuRestoreState') || 'null');
+  } catch (e) {
+    return null;
+  }
+}
+function clearMenuRestoreState() {
+  try {
+    sessionStorage.removeItem('ejsMenuRestoreState');
+  } catch (e) {
+    console.log(e);
+  }
+}
+function isSelectorRoute(hash) {
+  return hash === selectorRouteMap.variant || hash === selectorRouteMap.save;
+}
 function snapshotMenuState() {
   return {
+    hash: window.location.hash || '#main',
     config: $('#menu').data('config') || null,
     activeItem: currentMenuActiveItem || 0,
     filter: $('#console-list-search').val() || '',
@@ -1619,13 +1690,25 @@ function restoreMenuState(snapshot) {
 }
 function openSelectorMenu(config, activeItem) {
   selectorMenuStack.push(snapshotMenuState());
-  rendermenu([config, typeof activeItem === 'number' ? activeItem : 0]);
+  saveSelectorStackState();
+  var route = selectorRouteMap[config.selectorKind] || selectorRouteMap.variant;
+  storeSelectorRouteState(route, config, activeItem);
+  if (window.location.hash === route) {
+    rendermenu([config, typeof activeItem === 'number' ? activeItem : 0]);
+    return;
+  }
+  window.location.href = route;
 }
 function closeSelectorMenu() {
   var snapshot = selectorMenuStack.pop();
-  if (!restoreMenuState(snapshot)) {
+  saveSelectorStackState();
+  clearSelectorRouteState();
+  if (!snapshot) {
     window.location.href = '#main';
+    return;
   }
+  storeMenuRestoreState(snapshot);
+  window.location.href = snapshot.hash || '#main';
 }
 function variantCodeSummary(variant) {
   var lines = [];
@@ -2949,15 +3032,15 @@ function groupConsoleItems(consoleConfig, consoleRoot) {
           id: variant.id,
           key: 'single:' + name,
           name: name,
-          displayName: resolved.selector_display_name || name,
+          displayName: item.selector_display_name || resolved.selector_display_name || name,
           root: consoleRoot,
           title: consoleConfig.title || consoleRoot,
           originalIndex: index,
           representative: variant,
           variants: [variant],
           variantCount: 1,
-          selectorSubtitle: resolved.selector_subtitle || '',
-          selectorDetails: resolved.selector_details || '',
+          selectorSubtitle: item.selector_subtitle || resolved.selector_subtitle || '',
+          selectorDetails: item.selector_details || resolved.selector_details || '',
           searchText: variant.searchText,
           itemType: itemType
         });
@@ -3581,6 +3664,10 @@ async function rendermenu(datas) {
   closeVariantPanel();
   // Set default variables
   var portrait = window.orientation;
+  if (data.selectorMode) {
+    portrait = 0;
+    silenceBackgroundMedia(true);
+  }
   $('#menu').data('config', data);
   var root = data.root;
   $('#menu').data('root', root);
@@ -4318,12 +4405,21 @@ async function loadjson(name, active_item) {
 window.onload = async function() {
   updateLoginState();
   await loadPublicSettings();
+  loadSelectorStackState();
   $('#game-search').on('input', debounce(runGameSearch, 150));
   $('#console-filter').on('change', runGameSearch);
   $('#art-filter').on('change', runGameSearch);
   $('#favorites-filter').on('change', runGameSearch);
   if (!isLoginGateActive()) {
-    if (! window.location.hash) {
+    var selectorRouteState = loadSelectorRouteState();
+    var restoreState = loadMenuRestoreState();
+    if (isSelectorRoute(window.location.hash) && selectorRouteState && selectorRouteState.route === window.location.hash && selectorRouteState.config) {
+      clearMenuRestoreState();
+      rendermenu([selectorRouteState.config, selectorRouteState.activeItem || 0]);
+    } else if (restoreState && restoreState.config) {
+      clearMenuRestoreState();
+      restoreMenuState(restoreState);
+    } else if (! window.location.hash) {
       loadjson('main');
     } else {
       var hash = window.location.hash.replace('#','');

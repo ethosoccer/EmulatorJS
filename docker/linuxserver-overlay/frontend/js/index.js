@@ -3967,6 +3967,9 @@ async function rendermenu(datas) {
     } else {
       $('.menu-img').css({'max-width': '90vw'});
     }
+    if (data.selectorMode) {
+      $('#games-list > div').css({'min-height': image_height});
+    }
     syncMenuControllerSelection();
   }
   function renderMenuItems(nextActiveItem) {

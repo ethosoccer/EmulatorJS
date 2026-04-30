@@ -458,20 +458,20 @@ body.front-panel-open .login-panel {
     width: min(34vw, 560px);
     max-width: calc(100vw - 16px);
     height: calc(100vh - 92px);
-    overflow-y: auto;
+    overflow: hidden;
     display: flex;
     flex-direction: column;
-    justify-content: flex-start;
+    justify-content: center;
     align-items: flex-end;
-    gap: 10px;
-    padding: 12px 0;
-    scroll-padding-block: 40vh;
+    gap: 0;
+    padding: 0;
     visibility: visible;
 }
 
 #menu.selector-route-active .games-list > div {
     width: 100%;
     display: flex;
+    align-items: center;
     justify-content: flex-end;
 }
 

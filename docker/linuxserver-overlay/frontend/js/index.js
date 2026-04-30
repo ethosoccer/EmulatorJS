@@ -475,14 +475,6 @@ function getMenuRowControls(index) {
 function syncMenuControllerSelection() {
   clearControllerSelectionClasses();
   var $row = $('#h' + currentMenuActiveItem);
-  if ($row.length && $('#menu').hasClass('selector-route-active')) {
-    var rowElement = $row.get(0);
-    if (rowElement && typeof rowElement.scrollIntoView === 'function') {
-      try {
-        rowElement.scrollIntoView({block: 'center', inline: 'nearest'});
-      } catch (e) {}
-    }
-  }
   var $controls = getMenuRowControls(currentMenuActiveItem);
   if (!$controls.length) {
     return false;
@@ -3946,7 +3938,7 @@ async function rendermenu(datas) {
           </div>\
         </div>';
   }
-    function renderVisibleEntries() {
+  function renderVisibleEntries() {
       $('#games-list').empty();
       var logo_load_start = active_item - Math.floor(visible_items/2);
       var rendered = {};
@@ -3963,6 +3955,9 @@ async function rendermenu(datas) {
           rendered[itemIndex] = true;
           $('#games-list').append(buildMenuEntry(filteredEntries[itemIndex], itemIndex));
       }
+    }
+    if (data.selectorMode) {
+      $('#games-list').scrollTop(0);
     }
     refreshFavoriteButtons();
     refreshSaveIndicators();

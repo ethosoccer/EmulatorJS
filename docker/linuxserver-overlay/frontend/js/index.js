@@ -217,6 +217,19 @@ function getGamepadsList() {
     return [];
   }
 }
+function dispatchGamepadConnected(gp) {
+  if (!gp) {
+    return;
+  }
+  try {
+    window.dispatchEvent(new GamepadEvent("gamepadconnected", {gamepad: gp}));
+    return;
+  } catch (e) {
+  }
+  var fallbackEvent = new Event("gamepadconnected");
+  fallbackEvent.gamepad = gp;
+  window.dispatchEvent(fallbackEvent);
+}
 function resetGameplayViewport() {
   try {
     window.scrollTo(0, 0);
@@ -3603,8 +3616,7 @@ function launch(active_item) {
       EJS_onGameStart = function() {
         gameStarted = true;
         getGamepadsList().forEach(function(gp) {
-          let gpEvt = new GamepadEvent("gamepadconnected",{gamepad: gp});
-          window.dispatchEvent(gpEvt);
+          dispatchGamepadConnected(gp);
         });
       }
     } else {
@@ -4549,10 +4561,7 @@ async function rendermenu(datas) {
   window.addEventListener("load", () => {
     var gameStarted = false;
     getGamepadsList().forEach(function(gp) {
-      let gpEvt = new GamepadEvent("gamepadconnected", {
-        gamepad: gp
-      });
-      window.dispatchEvent(gpEvt);
+      dispatchGamepadConnected(gp);
     });
   });
   window.addEventListener("hashchange", gameLoop);

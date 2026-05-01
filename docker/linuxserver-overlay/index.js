@@ -583,6 +583,7 @@ function defaultSettings() {
   return {
     requireLogin: false,
     selectorStyle: 'menu',
+    launchErrorDebug: false,
     passwordResetWebhook: '',
     localLogsEnabled: true,
     localLogRetentionDays: 90,

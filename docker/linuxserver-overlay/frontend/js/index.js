@@ -41,6 +41,7 @@ var menuActionIndex = 0;
 var currentMenuActiveItem = 0;
 var requireMainLogin = false;
 var selectorStyle = 'menu';
+var launchErrorDebug = false;
 var selectorMenuStack = [];
 var selectorRouteMap = {
   variant: '#selector-game',
@@ -2446,6 +2447,7 @@ async function loadPublicSettings() {
     var json = await res.json();
     requireMainLogin = json.status == 'success' && json.requireLogin === true;
     selectorStyle = json.status == 'success' && json.selectorStyle === 'popup' ? 'popup' : 'menu';
+    launchErrorDebug = json.status == 'success' && json.launchErrorDebug === true;
   } catch(e) {
     console.log(e);
   }
@@ -3684,6 +3686,9 @@ function launch(active_item) {
       console.log('Unable to hide Node-like globals during launch', e);
     }
     window.EJS_showLaunchError = function(message) {
+      if (!launchErrorDebug) {
+        return;
+      }
       var target = document.getElementById('loading') || document.getElementById('game') || document.body;
       if (!target) {
         return;
@@ -3718,14 +3723,18 @@ function launch(active_item) {
         text += '\n' + error.stack;
       }
       console.log(text);
-      window.EJS_showLaunchError(text);
+      if (launchErrorDebug) {
+        window.EJS_showLaunchError(text);
+      }
       restoreLaunchGlobals();
     };
     window.onunhandledrejection = function(event) {
       var reason = event && event.reason ? event.reason : 'Unknown promise rejection';
       var text = 'Launch promise rejection: ' + (reason && reason.stack ? reason.stack : reason);
       console.log(text);
-      window.EJS_showLaunchError(text);
+      if (launchErrorDebug) {
+        window.EJS_showLaunchError(text);
+      }
       restoreLaunchGlobals();
     };
     // Set emulator variables
@@ -3786,7 +3795,9 @@ function launch(active_item) {
     loaderscript.src = script;
     loaderscript.onerror = function() {
       restoreLaunchGlobals();
-      window.EJS_showLaunchError('Failed to load startup script: ' + script);
+      if (launchErrorDebug) {
+        window.EJS_showLaunchError('Failed to load startup script: ' + script);
+      }
     };
     document.head.append(loaderscript);
     // Click play button as soon as it appears

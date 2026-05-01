@@ -33,6 +33,7 @@ function defaultSettings() {
   return {
     requireLogin: false,
     selectorStyle: 'menu',
+    launchErrorDebug: false,
     passwordResetWebhook: '',
     localLogsEnabled: true,
     localLogRetentionDays: 90,
@@ -880,7 +881,12 @@ app.post('/*', async function(req, res) {
       // Send default profile unauthenticated
       if (type == 'publicsettings') {
         let settings = await readSettings();
-        res.json({status: 'success', requireLogin: settings.requireLogin === true, selectorStyle: settings.selectorStyle === 'popup' ? 'popup' : 'menu'});
+        res.json({
+          status: 'success',
+          requireLogin: settings.requireLogin === true,
+          selectorStyle: settings.selectorStyle === 'popup' ? 'popup' : 'menu',
+          launchErrorDebug: settings.launchErrorDebug === true
+        });
       } else if (type == 'default') {
       try {
         let profilePath = home + '/profile/default/';
@@ -1089,6 +1095,7 @@ app.post('/*', async function(req, res) {
             status: 'success',
             requireLogin: settings.requireLogin === true,
             selectorStyle: settings.selectorStyle === 'popup' ? 'popup' : 'menu',
+            launchErrorDebug: settings.launchErrorDebug === true,
             passwordResetWebhook: settings.passwordResetWebhook || ''
           });
         } else if (type == 'setsettings') {
@@ -1099,6 +1106,7 @@ app.post('/*', async function(req, res) {
           let settings = await readSettings();
           settings.requireLogin = req.body.requireLogin === true;
           settings.selectorStyle = req.body.selectorStyle === 'popup' ? 'popup' : 'menu';
+          settings.launchErrorDebug = req.body.launchErrorDebug === true;
           settings.passwordResetWebhook = req.body.passwordResetWebhook || '';
           await writeSettings(settings);
           res.json({status: 'success'});

@@ -204,6 +204,40 @@ body.profile-required .login-panel {
   color: white;
 }
 
+html.gameplay,
+body.gameplay {
+  background-color: black;
+  overflow: hidden;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+}
+
+body.gameplay #game {
+  text-align: center;
+  color: white;
+}
+
+body.gameplay canvas {
+  border: none;
+  outline: none;
+}
+
+body.gameplay #gamepad {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100dvh;
+  z-index: 2147483647;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+body.gameplay #gamepad .screenGamepad-Joystick,
+body.gameplay #gamepad .screenGamepad-Button {
+  pointer-events: auto;
+}
+
 #startEmu {
   position: absolute;
   top: 50%;

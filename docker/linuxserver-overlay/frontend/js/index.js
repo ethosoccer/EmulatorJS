@@ -188,6 +188,44 @@ function freshJsonUrl(url) {
 function fetchFreshJson(url) {
   return fetch(freshJsonUrl(url), Init);
 }
+function normalizeGamepads(gamepads) {
+  if (!gamepads) {
+    return [];
+  }
+  if (typeof gamepads[Symbol.iterator] === 'function') {
+    return Array.from(gamepads).filter(Boolean);
+  }
+  if (typeof gamepads.length === 'number') {
+    return Array.from({length: gamepads.length}, function(_, index) {
+      return gamepads[index];
+    }).filter(Boolean);
+  }
+  return Object.keys(gamepads).filter(function(key) {
+    return String(Number(key)) === key;
+  }).map(function(key) {
+    return gamepads[key];
+  }).filter(Boolean);
+}
+function getGamepadsList() {
+  if (!navigator.getGamepads || typeof navigator.getGamepads !== 'function') {
+    return [];
+  }
+  try {
+    return normalizeGamepads(navigator.getGamepads());
+  } catch (e) {
+    console.log('Unable to read gamepads', e);
+    return [];
+  }
+}
+function resetGameplayViewport() {
+  try {
+    window.scrollTo(0, 0);
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+  } catch (e) {
+    console.log('Unable to reset gameplay viewport', e);
+  }
+}
 function getFrontPanelSelectors() {
   return ['#search-panel', '#favorites-panel', '#save-panel', '#variant-panel', '#login-panel'];
 }
@@ -3564,15 +3602,10 @@ function launch(active_item) {
       var EJSemu = false;
       EJS_onGameStart = function() {
         gameStarted = true;
-        let gps = navigator.getGamepads();
-        if (gps) {
-          for (let gp of gps) {
-            if (gp) {
-              let gpEvt = new GamepadEvent("gamepadconnected",{gamepad: gp});
-              window.dispatchEvent(gpEvt);
-            }
-          }
-        }
+        getGamepadsList().forEach(function(gp) {
+          let gpEvt = new GamepadEvent("gamepadconnected",{gamepad: gp});
+          window.dispatchEvent(gpEvt);
+        });
       }
     } else {
       var script = 'data/loader.js'
@@ -3588,8 +3621,12 @@ function launch(active_item) {
     var gameSaveName = name + rom_extension;
     var bios = 'user/' + path + '/bios/' + selected.data('bios');
     var gameConsoleTitle = $('#menu').data('config') && $('#menu').data('config').title ? $('#menu').data('config').title : root;
+    document.documentElement.classList.add('gameplay');
+    document.body.classList.add('gameplay');
     // Clear screen
     $('body').empty();
+    document.body.className = 'gameplay';
+    resetGameplayViewport();
     // Add game window
     var gameDiv = $('<div>').attr('id','game');
     $('body').append(gameDiv);
@@ -3693,6 +3730,7 @@ function launch(active_item) {
         if (typeof previousGameStart === 'function') {
           previousGameStart();
         }
+        resetGameplayViewport();
         restoreLaunchGlobals();
         notifyGameStarted({
           gameName: name,
@@ -3708,7 +3746,7 @@ function launch(active_item) {
         startSaveWatchTimer(true);
       };
     // Load touch screen interface
-    if ((! EJSemu) && (window.orientation !== undefined) && localStorage.getItem('touchpad') !== 'false' && !navigator.getGamepads()?.[0]) {
+    if ((! EJSemu) && (window.orientation !== undefined) && localStorage.getItem('touchpad') !== 'false' && !getGamepadsList()[0]) {
       // Determine type to render
       if (localStorage.getItem('touchpad') !== null) {
         if (localStorage.getItem('touchpad') == 'simple') {
@@ -4510,15 +4548,12 @@ async function rendermenu(datas) {
   window.addEventListener("gamepaddisconnected", cancelAnimationFrame(animReq))
   window.addEventListener("load", () => {
     var gameStarted = false;
-    let gps = navigator.getGamepads();
-    if (gps) {
-      for (let gp of gps) {
-        let gpEvt = new GamepadEvent("gamepadconnected", {
-          gamepad: gp
-        })
-        window.dispatchEvent(gpEvt)
-      }
-    }
+    getGamepadsList().forEach(function(gp) {
+      let gpEvt = new GamepadEvent("gamepadconnected", {
+        gamepad: gp
+      });
+      window.dispatchEvent(gpEvt);
+    });
   });
   window.addEventListener("hashchange", gameLoop);
 }

@@ -629,6 +629,13 @@ body.front-panel-open .login-panel {
 }
 
 @media (max-width: 900px) {
+  #menu.console-route-mobile-active #active-list {
+    left: 8px;
+    right: 8px;
+    width: auto !important;
+    max-width: calc(100vw - 16px);
+  }
+
   #menu.selector-route-active {
     --selector-panel-width: min(92vw, 460px);
     --selector-panel-top: 12px;
@@ -1123,6 +1130,12 @@ body.profile-required .profile-login-copy {
   .console-filter-active .games-list {
     top: 212px;
     height: calc(100vh - 212px);
+  }
+
+  #menu.console-route-mobile-active #active-list {
+    left: 8px;
+    right: 8px;
+    max-width: calc(100vw - 16px);
   }
 
   #menu.selector-route-mobile-active #games-list {

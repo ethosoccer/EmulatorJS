@@ -3871,6 +3871,7 @@ async function rendermenu(datas) {
   var active_item = datas[1];
   closeVariantPanel();
   var mobileSelectorMode = !!data.selectorMode && window.innerWidth <= 900;
+  var mobileConsoleMode = !data.selectorMode && window.innerWidth <= 900;
   // Set default variables
   var portrait = window.orientation;
   if (data.selectorMode) {
@@ -3878,6 +3879,7 @@ async function rendermenu(datas) {
   }
   $('#menu').toggleClass('selector-route-active', !!data.selectorMode);
   $('#menu').toggleClass('selector-route-mobile-active', mobileSelectorMode);
+  $('#menu').toggleClass('console-route-mobile-active', mobileConsoleMode);
   $('#menu').attr('data-selector-title', data.selectorMode ? (data.title || '') : '');
   $('#menu').attr('data-selector-kind', data.selectorMode ? (data.selectorKind || '') : '');
   $('#menu').data('config', data);
@@ -4144,6 +4146,9 @@ async function rendermenu(datas) {
       } else if (data.selectorMode) {
         $('.menu-img').css({'max-width': '100%'});
         $('#games-list').css({'width': 'min(46vw, 550px)'});
+      } else if (mobileConsoleMode) {
+        $('.menu-img').css({'max-width': '90vw'});
+        $('#active-list').css({'width': 'calc(100vw - 16px)'});
       } else {
         $('.menu-img').css({'max-width': '90vw'});
         $('#active-list').css({'width': '100vw'});

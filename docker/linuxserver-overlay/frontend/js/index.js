@@ -4102,7 +4102,7 @@ async function rendermenu(datas) {
     } else {
       if (mobileSelectorMode) {
         $('.menu-img').css({'max-width': '100%'});
-        $('#games-list').css({'width': '100vw'});
+        $('#games-list').css({'width': 'calc(100vw - 16px)'});
       } else if (data.selectorMode) {
         $('.menu-img').css({'max-width': '100%'});
         $('#games-list').css({'width': 'min(46vw, 550px)'});

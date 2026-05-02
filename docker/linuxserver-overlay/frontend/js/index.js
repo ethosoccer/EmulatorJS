@@ -4100,7 +4100,7 @@ async function rendermenu(datas) {
     } else {
       if (data.selectorMode) {
         $('.menu-img').css({'max-width': '100%'});
-        $('#games-list').css({'width': 'min(46vw, 760px)'});
+        $('#games-list').css({'width': 'min(46vw, 550px)'});
       } else {
         $('.menu-img').css({'max-width': '90vw'});
         $('#active-list').css({'width': '100vw'});

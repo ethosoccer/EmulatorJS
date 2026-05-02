@@ -1051,6 +1051,11 @@ body.profile-required .profile-login-copy {
     height: calc(100vh - 196px);
   }
 
+  #menu.console-route-mobile-active #console-list-tools.hidden + #active-list {
+    top: 104px;
+    height: calc(100vh - 104px);
+  }
+
   #menu.console-route-mobile-active .menu-div {
     display: flex;
     justify-content: center;
@@ -1197,6 +1202,11 @@ body.profile-required .profile-login-copy {
     left: 8px;
     right: 8px;
     max-width: calc(100vw - 16px);
+  }
+
+  #menu.console-route-mobile-active #console-list-tools.hidden + #active-list {
+    top: 104px;
+    height: calc(100vh - 104px);
   }
 
   #menu.selector-route-mobile-active #games-list {

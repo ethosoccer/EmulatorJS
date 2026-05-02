@@ -454,65 +454,66 @@ body.front-panel-open .login-panel {
   box-shadow: 0 0 0 2px rgba(106, 222, 255, .22);
 }
 
-#menu.selector-route-active .menu-wrap {
-    justify-content: flex-end;
-    align-items: center;
-    height: auto;
-    width: 100%;
-    min-height: 82px;
-    padding: 8px 0;
-    border: none;
-    border-radius: 0;
-    background: transparent;
-    box-shadow: none;
-    transition: background .16s ease, border-color .16s ease, box-shadow .16s ease;
+#menu.selector-route-active {
+  --selector-panel-width: min(34vw, 540px);
+  --selector-panel-top: 24px;
+  --selector-panel-right: 24px;
 }
 
-#menu.selector-route-active .menu-wrap a {
-    display: flex;
-    align-items: center;
-    min-width: 0;
-    width: min(24vw, 430px);
-    max-width: calc(100% - 120px);
-    flex: 0 1 min(24vw, 430px);
-    padding: 18px 20px;
-    padding-right: 20px;
-    border-radius: 16px;
-    background: transparent;
-}
-
-#menu.selector-route-active .menu-wrap:hover {
-    background: transparent;
+#menu.selector-route-active::before {
+  content: attr(data-selector-title);
+  position: fixed;
+  top: calc(var(--selector-panel-top) + 18px);
+  right: calc(var(--selector-panel-right) + 18px);
+  z-index: 3;
+  width: calc(var(--selector-panel-width) - 36px);
+  max-width: calc(100vw - 68px);
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, .14);
+  color: rgba(255, 255, 255, .94);
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: clamp(20px, 2vw, 30px);
+  font-weight: 700;
+  letter-spacing: .02em;
+  line-height: 1.2;
+  text-align: left;
+  pointer-events: none;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, .45);
 }
 
 #menu.selector-route-active .games-list {
-    top: 78px;
-    right: 0;
-    left: auto;
-    width: min(34vw, 560px);
-    max-width: calc(100vw - 16px);
-    height: calc(100vh - 92px);
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: flex-end;
-    gap: 0;
-    padding: 0;
-    visibility: visible;
+  top: var(--selector-panel-top);
+  right: var(--selector-panel-right);
+  left: auto;
+  z-index: 2;
+  width: var(--selector-panel-width);
+  max-width: calc(100vw - 32px);
+  height: calc(100vh - (var(--selector-panel-top) * 2));
+  padding: 82px 16px 16px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  align-items: stretch;
+  gap: 10px;
+  visibility: visible;
+  border: 1px solid rgba(255, 255, 255, .12);
+  border-radius: 22px;
+  background: linear-gradient(180deg, rgba(8, 11, 18, .82), rgba(9, 14, 22, .70));
+  box-shadow: 0 18px 55px rgba(0, 0, 0, .34);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  overscroll-behavior: contain;
 }
 
 #menu.selector-route-active .games-list > div {
-    width: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
+  width: 100%;
+  display: block;
 }
 
 #menu.selector-route-active .selector-spacer {
-    min-height: 82px;
-    width: 100%;
-    pointer-events: none;
+  display: none;
 }
 
 #menu.selector-route-active #games-list.hidden {
@@ -524,73 +525,131 @@ body.front-panel-open .login-panel {
   display: none;
 }
 
+#menu.selector-route-active .menu-wrap {
+  justify-content: stretch;
+  align-items: stretch;
+  height: auto;
+  width: 100%;
+  min-height: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+#menu.selector-route-active .menu-wrap a {
+  display: block;
+  width: 100%;
+  max-width: none;
+  padding: 15px 18px;
+  padding-right: 152px;
+  border: 1px solid rgba(255, 255, 255, .08);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, .05);
+  transition: background .14s ease, border-color .14s ease, box-shadow .14s ease;
+}
+
+#menu.selector-route-active .menu-wrap:hover {
+  background: transparent;
+}
+
+#menu.selector-route-active .menu-wrap a:hover,
+#menu.selector-route-active .menu-wrap a:focus-visible {
+  background: rgba(255, 255, 255, .10);
+  border-color: rgba(255, 255, 255, .18);
+}
+
 #menu.selector-route-active .controller-selected,
 #menu.selector-route-active .grow-mobile,
 #menu.selector-route-active .grow {
-    border-color: transparent;
-    background: transparent;
-    box-shadow: none;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
 }
 
 #menu.selector-route-active .grow-mobile,
 #menu.selector-route-active .grow {
-    animation: none;
-    transform: none;
+  animation: none;
+  transform: none;
 }
 
 #menu.selector-route-active .menu-wrap a.controller-selected,
 #menu.selector-route-active .menu-wrap.grow a,
 #menu.selector-route-active .menu-wrap.grow-mobile a {
-    background: rgba(15, 28, 42, .92);
-    box-shadow: 0 0 0 2px rgba(106, 222, 255, .22), 0 16px 28px rgba(0, 0, 0, .28);
+  border-color: rgba(106, 222, 255, .42);
+  background: rgba(14, 28, 43, .88);
+  box-shadow: 0 0 0 1px rgba(106, 222, 255, .16);
 }
 
 #menu.selector-route-active .menu-img {
-    font-size: clamp(24px, 2.6vw, 42px);
-    line-height: 1.1;
+  font-size: clamp(22px, 2.2vw, 34px);
+  line-height: 1.1;
 }
 
 #menu.selector-route-active .menu-subtitle {
-  font-size: clamp(14px, 1.15vw, 17px);
   margin-top: 8px;
+  font-size: clamp(13px, 1vw, 15px);
+  color: rgba(255, 255, 255, .72);
 }
 
 #menu.selector-route-active .menu-detail {
-  font-size: clamp(13px, 1vw, 15px);
   margin-top: 4px;
+  font-size: clamp(12px, .94vw, 14px);
+  color: rgba(186, 228, 255, .78);
 }
 
 #menu.selector-route-active .favorite-toggle,
 #menu.selector-route-active .rom-download-toggle,
 #menu.selector-route-active .save-toggle {
-    right: 0;
-    width: 42px;
-    height: 42px;
-    font-size: 20px;
+  top: 50%;
+  width: 38px;
+  height: 38px;
+  transform: translateY(-50%);
+  border-color: rgba(255, 255, 255, .16);
+  background: rgba(3, 5, 9, .64);
+  font-size: 19px;
+}
+
+#menu.selector-route-active .favorite-toggle {
+  right: 16px;
 }
 
 #menu.selector-route-active .rom-download-toggle {
-    right: 52px;
+  right: 60px;
 }
 
 #menu.selector-route-active .save-toggle {
-    right: 104px;
+  right: 104px;
 }
 
 @media (max-width: 900px) {
+  #menu.selector-route-active {
+    --selector-panel-width: min(92vw, 460px);
+    --selector-panel-top: 12px;
+    --selector-panel-right: 8px;
+  }
+
+  #menu.selector-route-active::before {
+    top: calc(var(--selector-panel-top) + 14px);
+    right: calc(var(--selector-panel-right) + 14px);
+    width: calc(var(--selector-panel-width) - 28px);
+    max-width: calc(100vw - 44px);
+    font-size: clamp(18px, 5vw, 24px);
+  }
+
   #menu.selector-route-active .games-list {
-      width: calc(100vw - 26px);
-      right: 0;
-      top: 84px;
-      height: calc(100vh - 98px);
-    }
+    max-width: calc(100vw - 16px);
+    height: calc(100vh - (var(--selector-panel-top) * 2));
+    padding: 74px 12px 12px;
+    border-radius: 18px;
+  }
 
   #menu.selector-route-active .menu-wrap a {
-      width: calc(100% - 120px);
-      max-width: calc(100% - 120px);
-      flex-basis: calc(100% - 120px);
-    }
+    padding: 14px 14px;
+    padding-right: 142px;
   }
+}
 
 .panel-icon-button {
   font-size: 17px;

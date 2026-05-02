@@ -3842,6 +3842,8 @@ async function rendermenu(datas) {
     portrait = 0;
   }
   $('#menu').toggleClass('selector-route-active', !!data.selectorMode);
+  $('#menu').attr('data-selector-title', data.selectorMode ? (data.title || '') : '');
+  $('#menu').attr('data-selector-kind', data.selectorMode ? (data.selectorKind || '') : '');
   $('#menu').data('config', data);
   var root = data.root;
   $('#menu').data('root', root);

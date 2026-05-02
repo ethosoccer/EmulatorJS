@@ -624,6 +624,10 @@ body.front-panel-open .login-panel {
   right: 104px;
 }
 
+#menu.selector-route-active .selector-save-download {
+  right: 16px;
+}
+
 @media (max-width: 900px) {
   #menu.selector-route-active {
     --selector-panel-width: min(92vw, 460px);
@@ -694,6 +698,10 @@ body.front-panel-open .login-panel {
 
   #menu.selector-route-mobile-active .save-toggle {
     right: 96px;
+  }
+
+  #menu.selector-route-mobile-active .selector-save-download {
+    right: 12px;
   }
 }
 

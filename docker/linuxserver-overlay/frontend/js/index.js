@@ -1563,6 +1563,19 @@ async function downloadSaveFile(saveId) {
   a.remove();
   URL.revokeObjectURL(url);
 }
+function downloadSelectorSave(event, button) {
+  if (event) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+  var saveId = button && typeof button.getAttribute === 'function'
+    ? (button.getAttribute('data-selector-save-id') || button.getAttribute('data-selector_save_id') || '')
+    : '';
+  if (!saveId) {
+    return;
+  }
+  downloadSaveFile(saveId);
+}
 function setSavePanelBack(handler) {
   savePanelBackHandler = handler || null;
   $('#save-panel-back').toggleClass('hidden', !savePanelBackHandler);
@@ -3993,6 +4006,8 @@ async function rendermenu(datas) {
         if (showFavoriteButton && showSelectorButtons) {
           favoriteButton = '<button class="favorite-toggle" type="button" data-menu-index="' + count + '" data-favorite-id="' + escapeHtml(favoriteId) + '" data-favorite-name="' + escapeHtml(favoriteName) + '" data-favorite-exact-name="' + escapeHtml(romName) + '" data-favorite-root="' + escapeHtml(root) + '" data-favorite-title="' + escapeHtml(itemTitle) + '" data-favorite-index="' + entry.originalIndex + '" data-favorite-variant-count="' + (entry.variantCount || 1) + '" onclick="toggleFavorite(event, this.getAttribute(\'data-favorite-id\'), this)" aria-label="Toggle favorite" title="Add to favorites">&hearts;</button>';
         }
+      } else if (itemType == 'selector-save' && item.hasOwnProperty('selector_save_id')) {
+        saveButton = '<button class="save-toggle has-saves selector-save-download" type="button" data-selector-save-id="' + escapeHtml(item.selector_save_id) + '" onclick="downloadSelectorSave(event, this)" aria-label="Download save file" title="Download save file">&#10515;</button>';
       }
       return '\
         <div id="m' + count + '">\

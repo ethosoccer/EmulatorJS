@@ -2748,7 +2748,7 @@ function refreshFavoriteButtons() {
 }
 function setSaveButtonState(saveBase, hasSaves) {
   $('.save-toggle').filter(function() {
-    return this.dataset.saveBase === saveBase;
+    return !$(this).hasClass('selector-save-download') && this.dataset.saveBase === saveBase;
   }).each(function() {
     $(this).toggleClass('hidden', !hasSaves);
     $(this).toggleClass('has-saves', hasSaves);
@@ -2758,6 +2758,9 @@ function setSaveButtonState(saveBase, hasSaves) {
 async function refreshSaveIndicators() {
   var saves = await getSaveInventory(false);
   $('.save-toggle').each(function() {
+    if ($(this).hasClass('selector-save-download')) {
+      return;
+    }
     var saveBase = this.dataset.saveBase;
     var hasSaves = saves.some(function(save) {
       return saveRecordMatchesGame(save, saveBase);

@@ -4132,7 +4132,9 @@ async function rendermenu(datas) {
     } else {
       active_item--
     }
-    if (active_item < 0) {
+    if (data.selectorMode) {
+      active_item = Math.max(0, active_item);
+    } else if (active_item < 0) {
       active_item = items_length;
     }
     currentMenuActiveItem = active_item;
@@ -4164,7 +4166,9 @@ async function rendermenu(datas) {
     } else {
       active_item++
     }
-    if (active_item > items_length) {
+    if (data.selectorMode) {
+      active_item = Math.min(items_length, active_item);
+    } else if (active_item > items_length) {
       active_item = 0;
     }
     currentMenuActiveItem = active_item;
@@ -4270,6 +4274,9 @@ async function rendermenu(datas) {
   //// Touch controls ////
   // Scroll wheel
   async function scroll(ev) {
+    if (data.selectorMode) {
+      return;
+    }
     window.scrollKill = false;
     var scrolling = setInterval(() => {
       if (window.scrollKill == false) {

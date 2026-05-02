@@ -1039,15 +1039,16 @@ body.profile-required .profile-login-copy {
     padding: 8px;
     border: 1px solid rgba(255, 255, 255, .16);
     border-radius: 14px;
-    background: rgba(6, 10, 16, .88);
+    background: rgba(3, 5, 9, .97);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
+    box-shadow: 0 14px 32px rgba(0, 0, 0, .42);
     box-sizing: border-box;
   }
 
   #menu.console-route-mobile-active #active-list {
-    top: 188px;
-    height: calc(100vh - 188px);
+    top: 196px;
+    height: calc(100vh - 196px);
   }
 
   #menu.console-route-mobile-active .menu-div {
@@ -1061,10 +1062,11 @@ body.profile-required .profile-login-copy {
 
   #menu.console-route-mobile-active .menu-wrap a {
     display: block;
-    width: min(92vw, 420px);
+    width: min(76vw, 320px);
     max-width: 100%;
     margin: 0 auto;
-    padding-right: 126px;
+    padding-left: 12px;
+    padding-right: 96px;
     text-align: center;
   }
 
@@ -1076,6 +1078,15 @@ body.profile-required .profile-login-copy {
     margin-left: auto;
     margin-right: auto;
     text-align: center;
+  }
+
+  #menu.console-route-mobile-active .grow-mobile {
+    animation: none;
+    transform: scale(.92);
+  }
+
+  #menu.console-route-mobile-active .shrink-mobile {
+    transform: scale(.72);
   }
 
   .menu-toolbar {
@@ -1181,8 +1192,8 @@ body.profile-required .profile-login-copy {
   }
 
   #menu.console-route-mobile-active #active-list {
-    top: 232px;
-    height: calc(100vh - 232px);
+    top: 240px;
+    height: calc(100vh - 240px);
     left: 8px;
     right: 8px;
     max-width: calc(100vw - 16px);

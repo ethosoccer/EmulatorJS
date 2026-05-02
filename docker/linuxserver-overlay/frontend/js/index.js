@@ -313,6 +313,18 @@ function clickDomElement($element) {
   }
   return false;
 }
+function readDataAttr($element, key) {
+  if (!$element || !$element.length) {
+    return '';
+  }
+  var value = $element.data(key);
+  if (typeof value !== 'undefined' && value !== null && value !== '') {
+    return value;
+  }
+  var attrKey = String(key || '');
+  var dashKey = attrKey.replace(/_/g, '-');
+  return $element.attr('data-' + attrKey) || $element.attr('data-' + dashKey) || '';
+}
 function captureCurrentVisualState() {
   return {
     backgroundSrc: $('#background').attr('src') || '',
@@ -3530,13 +3542,13 @@ function loadlogos(logo_load_start, display_items, items_length, active_item) {
 function launch(active_item) {
   var selected = active_item && active_item.jquery ? active_item : (active_item && active_item.nodeType ? $(active_item) : $('#i' + active_item.toString()).first());
   var selectedIndex = selected.attr('id') ? Number(selected.attr('id').replace('i', '')) : Number(active_item);
-  var name = selected.data('name');
-  var displayName = selected.data('group-display-name') || selected.data('display-name') || name;
-  var type = selected.data('type');
+  var name = readDataAttr(selected, 'name');
+  var displayName = readDataAttr(selected, 'group-display-name') || readDataAttr(selected, 'display-name') || name;
+  var type = readDataAttr(selected, 'type');
   var selectorAction = selected.attr('data-selector_action') || selected.attr('data-selector-action') || '';
   var selectorSaveId = selected.attr('data-selector_save_id') || selected.attr('data-selector-save-id') || '';
   var selectorFavoriteId = selected.attr('data-selector_favorite_id') || selected.attr('data-selector-favorite-id') || '';
-  var multi = selected.data('multi_disc');
+  var multi = Number(readDataAttr(selected, 'multi_disc') || 0);
   var root = $('#menu').data('root');
   var originalActiveItem = Number(selected.attr('data-original-index') || selectedIndex);
   var menuEntries = $('#menu').data('menuEntries') || [];
@@ -3592,14 +3604,14 @@ function launch(active_item) {
     closeSelectorMenu();
     return;
   }
-  if (selected.data('variant-choice') !== true && groupedEntry && groupedEntry.variantCount > 1 && type == 'game') {
+  if (String(readDataAttr(selected, 'variant-choice')) !== 'true' && groupedEntry && groupedEntry.variantCount > 1 && type == 'game') {
     openVariantSelector(groupedEntry);
     return;
   }
-  if (selected.data('close-variant-panel') === true) {
+  if (String(readDataAttr(selected, 'close-variant-panel')) === 'true') {
     closeVariantPanel();
   }
-  if (type == 'game' && selected.data('save-selection-ready') !== true) {
+  if (type == 'game' && String(readDataAttr(selected, 'save-selection-ready')) !== 'true') {
     openLaunchSavePickerForButton(selected);
     return;
   }
@@ -3631,7 +3643,7 @@ function launch(active_item) {
     window.location.href = '#game';
     $(document).off('keydown');
     // Default variables for emulator
-    var emulator = selected.data('emulator');
+    var emulator = readDataAttr(selected, 'emulator');
     if (emulator.startsWith('libretro-')) {
       var emulator = emulator.replace('libretro-','');
       var script = 'js/libretro.js'
@@ -3650,11 +3662,11 @@ function launch(active_item) {
         document.querySelectorAll('[data-btn="fullscreen"]')[0].click();
       }
     };
-    var path =  selected.data('path');
+    var path =  readDataAttr(selected, 'path');
     var rom_path = 'user/' + path + '/roms/';
-    var rom_extension = selected.data('rom_extension');
+    var rom_extension = readDataAttr(selected, 'rom_extension');
     var gameSaveName = name + rom_extension;
-    var bios = 'user/' + path + '/bios/' + selected.data('bios');
+    var bios = 'user/' + path + '/bios/' + readDataAttr(selected, 'bios');
     var gameConsoleTitle = $('#menu').data('config') && $('#menu').data('config').title ? $('#menu').data('config').title : root;
     document.documentElement.classList.add('gameplay');
     document.body.classList.add('gameplay');

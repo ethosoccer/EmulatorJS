@@ -2923,6 +2923,11 @@ function resolveItem(item, defaults) {
       resolved[key] = defaults[key];
     }
   }
+  Object.keys(item || {}).forEach(function(key) {
+    if (!resolved.hasOwnProperty(key)) {
+      resolved[key] = item[key];
+    }
+  });
   return resolved;
 }
 function normalizeVariantKey(value) {

@@ -2071,6 +2071,7 @@ function buildVariantSelectorConfig(entry, mode) {
       item.type = 'game';
       item.multi_disc = Number(item.multi_disc || 0);
       item.variant_choice = true;
+      item.selector_rom_name = variant.name || '';
     }
     item.has_logo = false;
     item.has_video = false;
@@ -3961,7 +3962,9 @@ async function rendermenu(datas) {
       var has_logo = data.defaults.has_logo;
     };
     // Render differently for multi disc menus
-    if (data.hasOwnProperty('multi_name') && hasUsableValue(data.multi_name)) {
+    if (item.hasOwnProperty('selector_rom_name') && hasUsableValue(item.selector_rom_name)) {
+      var romName = item.selector_rom_name;
+    } else if (data.hasOwnProperty('multi_name') && hasUsableValue(data.multi_name)) {
       var romName = data.multi_name;
     } else {
       var romName = name;

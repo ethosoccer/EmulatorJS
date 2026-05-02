@@ -455,7 +455,7 @@ body.front-panel-open .login-panel {
 }
 
 #menu.selector-route-active {
-  --selector-panel-width: min(34vw, 540px);
+  --selector-panel-width: min(29vw, 460px);
   --selector-panel-top: 24px;
   --selector-panel-right: 24px;
 }
@@ -506,6 +506,13 @@ body.front-panel-open .login-panel {
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   overscroll-behavior: contain;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+#menu.selector-route-active #games-list::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
 #menu.selector-route-active #games-list > div {
@@ -626,7 +633,7 @@ body.front-panel-open .login-panel {
 
 @media (max-width: 900px) {
   #menu.selector-route-active {
-    --selector-panel-width: min(92vw, 460px);
+    --selector-panel-width: min(88vw, 400px);
     --selector-panel-top: 12px;
     --selector-panel-right: 8px;
   }

@@ -482,6 +482,7 @@ body.front-panel-open .login-panel {
 }
 
 #menu.selector-route-active #games-list {
+  position: fixed;
   top: var(--selector-panel-top);
   right: var(--selector-panel-right);
   left: auto;

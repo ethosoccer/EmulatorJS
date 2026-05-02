@@ -4092,7 +4092,7 @@ async function rendermenu(datas) {
     // Render initial
     if (portrait !== 0) {
       $('.menu-img').css({'max-width': '30vw'});
-      $('.games-list').css({'width': '40vw'});
+      $('#active-list').css({'width': '40vw'});
       if (!data.selectorMode) {
         loadart(active_item);
         loadvideo(active_item);
@@ -4100,10 +4100,10 @@ async function rendermenu(datas) {
     } else {
       if (data.selectorMode) {
         $('.menu-img').css({'max-width': '100%'});
-        $('.games-list').css({'width': 'min(46vw, 760px)'});
+        $('#games-list').css({'width': 'min(46vw, 760px)'});
       } else {
         $('.menu-img').css({'max-width': '90vw'});
-        $('.games-list').css({'width': '100vw'});
+        $('#active-list').css({'width': '100vw'});
       }
     }
     var logo_load_start = active_item - Math.floor(visible_items/2);

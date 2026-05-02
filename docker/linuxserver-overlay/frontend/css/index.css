@@ -481,7 +481,7 @@ body.front-panel-open .login-panel {
   text-shadow: 0 2px 10px rgba(0, 0, 0, .45);
 }
 
-#menu.selector-route-active .games-list {
+#menu.selector-route-active #games-list {
   top: var(--selector-panel-top);
   right: var(--selector-panel-right);
   left: auto;
@@ -507,7 +507,7 @@ body.front-panel-open .login-panel {
   overscroll-behavior: contain;
 }
 
-#menu.selector-route-active .games-list > div {
+#menu.selector-route-active #games-list > div {
   width: 100%;
   display: block;
 }
@@ -638,7 +638,7 @@ body.front-panel-open .login-panel {
     font-size: clamp(18px, 5vw, 24px);
   }
 
-  #menu.selector-route-active .games-list {
+  #menu.selector-route-active #games-list {
     max-width: calc(100vw - 16px);
     height: calc(100vh - (var(--selector-panel-top) * 2));
     padding: 74px 12px 12px;

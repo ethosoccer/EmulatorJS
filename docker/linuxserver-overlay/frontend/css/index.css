@@ -1030,6 +1030,54 @@ body.profile-required .profile-login-copy {
 }
 
 @media (max-width: 760px) {
+  #menu.console-route-mobile-active .menu-toolbar {
+    position: fixed;
+    top: 8px;
+    left: 8px;
+    right: 8px;
+    max-width: calc(100vw - 16px);
+    padding: 8px;
+    border: 1px solid rgba(255, 255, 255, .16);
+    border-radius: 14px;
+    background: rgba(6, 10, 16, .88);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    box-sizing: border-box;
+  }
+
+  #menu.console-route-mobile-active #active-list {
+    top: 188px;
+    height: calc(100vh - 188px);
+  }
+
+  #menu.console-route-mobile-active .menu-div {
+    display: flex;
+    justify-content: center;
+  }
+
+  #menu.console-route-mobile-active .menu-wrap {
+    justify-content: center;
+  }
+
+  #menu.console-route-mobile-active .menu-wrap a {
+    display: block;
+    width: min(92vw, 420px);
+    max-width: 100%;
+    margin: 0 auto;
+    padding-right: 126px;
+    text-align: center;
+  }
+
+  #menu.console-route-mobile-active .menu-text {
+    align-items: center;
+  }
+
+  #menu.console-route-mobile-active .menu-img {
+    margin-left: auto;
+    margin-right: auto;
+    text-align: center;
+  }
+
   .menu-toolbar {
     top: 8px;
     left: 8px;
@@ -1133,6 +1181,8 @@ body.profile-required .profile-login-copy {
   }
 
   #menu.console-route-mobile-active #active-list {
+    top: 232px;
+    height: calc(100vh - 232px);
     left: 8px;
     right: 8px;
     max-width: calc(100vw - 16px);

@@ -650,6 +650,50 @@ body.front-panel-open .login-panel {
     padding: 14px 14px;
     padding-right: 142px;
   }
+
+  #menu.selector-route-mobile-active::before {
+    display: none;
+  }
+
+  #menu.selector-route-mobile-active #games-list {
+    position: fixed;
+    top: 112px;
+    left: 0;
+    right: 0;
+    width: 100vw !important;
+    max-width: 100vw;
+    height: calc(100vh - 124px);
+    padding: 0 8px 24px;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    overflow-x: hidden;
+    overflow-y: hidden;
+    touch-action: pan-y;
+  }
+
+  #menu.selector-route-mobile-active .menu-wrap a {
+    width: 100%;
+    padding: 14px 14px;
+    padding-right: 124px;
+    border-radius: 14px;
+    background: rgba(15, 23, 35, .88);
+  }
+
+  #menu.selector-route-mobile-active .favorite-toggle {
+    right: 12px;
+  }
+
+  #menu.selector-route-mobile-active .rom-download-toggle {
+    right: 54px;
+  }
+
+  #menu.selector-route-mobile-active .save-toggle {
+    right: 96px;
+  }
 }
 
 .panel-icon-button {
@@ -1070,6 +1114,13 @@ body.profile-required .profile-login-copy {
   .console-filter-active .games-list {
     top: 212px;
     height: calc(100vh - 212px);
+  }
+
+  #menu.selector-route-mobile-active #games-list {
+    top: 112px;
+    height: calc(100vh - 124px);
+    padding-left: 8px;
+    padding-right: 8px;
   }
 }
 

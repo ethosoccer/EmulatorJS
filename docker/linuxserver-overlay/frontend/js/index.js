@@ -3836,12 +3836,14 @@ async function rendermenu(datas) {
   var data = datas[0];
   var active_item = datas[1];
   closeVariantPanel();
+  var mobileSelectorMode = !!data.selectorMode && window.innerWidth <= 900;
   // Set default variables
   var portrait = window.orientation;
   if (data.selectorMode) {
     portrait = 0;
   }
   $('#menu').toggleClass('selector-route-active', !!data.selectorMode);
+  $('#menu').toggleClass('selector-route-mobile-active', mobileSelectorMode);
   $('#menu').attr('data-selector-title', data.selectorMode ? (data.title || '') : '');
   $('#menu').attr('data-selector-kind', data.selectorMode ? (data.selectorKind || '') : '');
   $('#menu').data('config', data);
@@ -4098,7 +4100,10 @@ async function rendermenu(datas) {
         loadvideo(active_item);
       }
     } else {
-      if (data.selectorMode) {
+      if (mobileSelectorMode) {
+        $('.menu-img').css({'max-width': '100%'});
+        $('#games-list').css({'width': '100vw'});
+      } else if (data.selectorMode) {
         $('.menu-img').css({'max-width': '100%'});
         $('#games-list').css({'width': 'min(46vw, 550px)'});
       } else {
@@ -4296,7 +4301,8 @@ async function rendermenu(datas) {
   function killScroll(ev) {
     window.scrollKill = true;
   };
-  var mc = new Hammer(document.getElementById('menu'));
+  var hammerTarget = (mobileSelectorMode && data.selectorMode) ? document.getElementById('games-list') : document.getElementById('menu');
+  var mc = new Hammer(hammerTarget);
   mc.get('swipe').set({ direction: Hammer.DIRECTION_ALL });
   mc.get('pan').set({ direction: Hammer.DIRECTION_ALL, threshold: 180 });
   mc.on("swipeup", function(ev) {

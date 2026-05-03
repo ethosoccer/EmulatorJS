@@ -1083,6 +1083,10 @@ body.profile-required .profile-login-copy {
   line-height: 1.45;
 }
 
+.profile-setting-help.hidden {
+  display: none;
+}
+
 .profile-tabs button.is-active {
   border-color: rgba(143, 214, 255, .75);
   background: rgba(143, 214, 255, .18);

@@ -1236,8 +1236,8 @@ body.profile-required .profile-login-copy {
   }
 
   .console-filter-active .games-list {
-    top: 130px;
-    height: calc(100vh - 130px);
+    top: 108px;
+    height: calc(100vh - 108px);
   }
 
   .search-panel,

@@ -1036,13 +1036,13 @@ body.profile-required .profile-login-copy {
 .profile-setting-label {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+  justify-content: flex-start;
+  gap: 8px;
 }
 
 .profile-setting-label label {
   margin: 0;
-  flex: 1 1 auto;
+  flex: 0 0 auto;
 }
 
 .profile-info-button {

@@ -862,6 +862,18 @@ body.profile-required .profile-login-copy {
   color: black;
 }
 
+.login-panel option {
+  color: white;
+  background-color: #1b212a;
+}
+
+.login-panel option:checked,
+.login-panel option:hover,
+.login-panel option:focus {
+  color: white;
+  background: linear-gradient(0deg, rgba(87, 183, 198, 0.42), rgba(87, 183, 198, 0.42)), #24303b;
+}
+
 .search-actions {
   display: flex;
   flex-wrap: wrap;

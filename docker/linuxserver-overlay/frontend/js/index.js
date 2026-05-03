@@ -3372,10 +3372,14 @@ function groupConsoleItems(consoleConfig, consoleRoot) {
   return entries;
 }
 async function fetchConfig(name) {
-  if (searchSourceConfigs[name]) {
+  if (Object.prototype.hasOwnProperty.call(searchSourceConfigs, name)) {
     return searchSourceConfigs[name];
   }
   var response = await fetchFreshJson('user/config/' + name + '.json');
+  if (!response.ok) {
+    searchSourceConfigs[name] = null;
+    throw new Error('Config not found for ' + name + ' (' + response.status + ')');
+  }
   var data = await response.json();
   searchSourceConfigs[name] = data;
   return data;
@@ -3395,7 +3399,9 @@ async function ensureSearchCatalog() {
 async function buildSearchCatalog() {
   var catalog = [];
   var consoles = [];
-  var mainConfig = searchSourceConfigs.main || $('#menu').data('config') || await fetchConfig('main');
+  var currentRoot = $('#menu').data('root') || '';
+  var inlineMainConfig = currentRoot === 'main' ? $('#menu').data('config') : null;
+  var mainConfig = searchSourceConfigs.main || inlineMainConfig || await fetchConfig('main');
   searchSourceConfigs.main = mainConfig;
   for await (var consoleRoot of Object.keys(mainConfig.items)) {
     try {

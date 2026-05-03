@@ -1042,6 +1042,7 @@ app.post('/*', async function(req, res) {
             status: 'success',
             user: profile[hash].username,
             role: currentRole,
+            settingsOverrides: normalizeUserOverrides(profile[hash].settingsOverrides),
             settings: {
               requireLogin: resolvedSettings.requireLogin === true,
               selectorStyle: resolvedSettings.selectorStyle === 'popup' ? 'popup' : 'menu',
@@ -1121,6 +1122,19 @@ app.post('/*', async function(req, res) {
           profile[targetHash].settingsOverrides = normalizeUserOverrides(req.body.settingsOverrides);
           await writeProfiles(profile);
           res.json({status: 'success'});
+        } else if (type == 'setmysettings') {
+          profile[hash].settingsOverrides = normalizeUserOverrides(req.body.settingsOverrides);
+          await writeProfiles(profile);
+          let updatedResolvedSettings = effectiveSettingsForProfile(profile[hash], settings);
+          res.json({
+            status: 'success',
+            settingsOverrides: normalizeUserOverrides(profile[hash].settingsOverrides),
+            settings: {
+              requireLogin: updatedResolvedSettings.requireLogin === true,
+              selectorStyle: updatedResolvedSettings.selectorStyle === 'popup' ? 'popup' : 'menu',
+              launchErrorDebug: updatedResolvedSettings.launchErrorDebug === true
+            }
+          });
         } else if (type == 'changepassword') {
           let newPass = req.body.newPass;
           if (!isStrongPassword(newPass)) {

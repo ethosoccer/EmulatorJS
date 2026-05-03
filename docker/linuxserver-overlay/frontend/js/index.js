@@ -37,6 +37,10 @@ var variantPanelState = null;
 var pendingLaunchSelection = null;
 var activeFrontPanelSelector = null;
 var frontPanelNavState = {selector: null, row: 0, col: 0};
+var currentSettingsOverrides = {
+  selectorStyle: null,
+  launchErrorDebug: null
+};
 var menuActionIndex = 0;
 var currentMenuActiveItem = 0;
 var requireMainLogin = false;
@@ -175,6 +179,23 @@ function applyResolvedProfileSettings(settings) {
   if (Object.prototype.hasOwnProperty.call(settings, 'launchErrorDebug')) {
     launchErrorDebug = settings.launchErrorDebug === true;
   }
+}
+
+function normalizeProfileSettingsOverrides(settingsOverrides) {
+  var value = settingsOverrides && typeof settingsOverrides === 'object' ? settingsOverrides : {};
+  return {
+    selectorStyle: value.selectorStyle === 'popup' ? 'popup' : value.selectorStyle === 'menu' ? 'menu' : null,
+    launchErrorDebug: value.launchErrorDebug === true ? true : value.launchErrorDebug === false ? false : null
+  };
+}
+
+function applyProfileSettingsOverrides(settingsOverrides) {
+  currentSettingsOverrides = normalizeProfileSettingsOverrides(settingsOverrides);
+  $('#profile-selector-style').val(currentSettingsOverrides.selectorStyle || '');
+  $('#profile-launch-debug').val(
+    currentSettingsOverrides.launchErrorDebug === true ? 'true' :
+      currentSettingsOverrides.launchErrorDebug === false ? 'false' : ''
+  );
 }
 function notifyGameStarted(details) {
   if (!localStorage.getItem('user') || !localStorage.getItem('pass')) {
@@ -2313,6 +2334,31 @@ function showProfileTab(tab) {
 function setProfileStatus(message) {
   $('#profile-status').text(message || '');
 }
+async function saveProfileSettings() {
+  setProfileStatus('Saving preferences...');
+  try {
+    var selectorValue = $('#profile-selector-style').val();
+    var launchValue = $('#profile-launch-debug').val();
+    var settingsOverrides = {
+      selectorStyle: selectorValue || null,
+      launchErrorDebug: launchValue === 'true' ? true : launchValue === 'false' ? false : null
+    };
+    var res = await profileRequest(profileRequestBody('setmysettings', {
+      settingsOverrides: settingsOverrides
+    }));
+    var json = await res.json();
+    if (json.status == 'success') {
+      applyProfileSettingsOverrides(json.settingsOverrides);
+      applyResolvedProfileSettings(json.settings);
+      setProfileStatus('Preferences saved.');
+    } else {
+      setProfileStatus('Unable to save preferences.');
+    }
+  } catch(e) {
+    console.log(e);
+    setProfileStatus('Unable to save preferences.');
+  }
+}
 function isLoginGateActive() {
   return requireMainLogin && (!localStorage.getItem('user') || !localStorage.getItem('pass'));
 }
@@ -2377,6 +2423,7 @@ function updateLoginState() {
     $('#login-button').text(user);
     $('#profile-panel-title').text('Profile');
     $('#profile-name').text('Logged in as ' + user + ' (' + role + ')');
+    applyProfileSettingsOverrides(currentSettingsOverrides);
     $('#profile-logged-out').addClass('hidden');
     $('#profile-logged-in').removeClass('hidden');
     $('body').removeClass('profile-required');
@@ -2393,6 +2440,7 @@ function updateLoginState() {
     $('#login-button').text('Login');
     $('#profile-panel-title').text(requireMainLogin ? 'Login' : 'Profile');
     $('#profile-name').empty();
+    applyProfileSettingsOverrides();
     $('#profile-logged-in').addClass('hidden');
     $('#profile-logged-out').removeClass('hidden');
     $('#file-browser-link').addClass('hidden');
@@ -2438,6 +2486,7 @@ async function profileLogin() {
       localStorage.setItem('user', json.user);
       localStorage.setItem('pass', pass);
       localStorage.setItem('role', json.role || 'user');
+      applyProfileSettingsOverrides(json.settingsOverrides);
       applyResolvedProfileSettings(json.settings);
       $('#profile-user').val('');
       updateLoginState();
@@ -2462,11 +2511,13 @@ async function verifyStoredProfileLogin() {
     if (json.status == 'success') {
       localStorage.setItem('user', json.user);
       localStorage.setItem('role', json.role || 'user');
+      applyProfileSettingsOverrides(json.settingsOverrides);
       applyResolvedProfileSettings(json.settings);
     } else {
       localStorage.removeItem('user');
       localStorage.removeItem('pass');
       localStorage.removeItem('role');
+      applyProfileSettingsOverrides();
     }
   } catch(e) {
     console.log(e);
@@ -2477,6 +2528,7 @@ function profileLogout() {
   localStorage.removeItem('user');
   localStorage.removeItem('pass');
   localStorage.removeItem('role');
+  applyProfileSettingsOverrides();
   clearInterval(profilePushTimer);
   profilePushTimer = null;
   stopSaveWatchTimer();

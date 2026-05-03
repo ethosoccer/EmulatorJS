@@ -800,7 +800,8 @@ body.profile-required .profile-login-copy {
 .login-panel button,
 .search-panel input,
 .search-panel select,
-.login-panel input {
+.login-panel input,
+.login-panel select {
   border: 1px solid rgba(255, 255, 255, .28);
   border-radius: 8px;
   background: rgba(255, 255, 255, .08);
@@ -827,10 +828,34 @@ body.profile-required .profile-login-copy {
 
 .search-panel input,
 .search-panel select,
-.login-panel input {
+.login-panel input,
+.login-panel select {
   width: 100%;
   min-height: 38px;
   padding: 8px 10px;
+}
+
+.login-panel select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  padding-right: 38px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, rgba(255, 255, 255, .84) 50%),
+    linear-gradient(135deg, rgba(255, 255, 255, .84) 50%, transparent 50%);
+  background-position:
+    calc(100% - 18px) calc(50% - 3px),
+    calc(100% - 12px) calc(50% - 3px);
+  background-size: 6px 6px, 6px 6px;
+  background-repeat: no-repeat;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .04);
+}
+
+.login-panel select:hover,
+.login-panel select:focus {
+  background-color: rgba(255, 255, 255, .14);
+  border-color: rgba(96, 219, 255, .72);
+  outline: none;
 }
 
 .search-panel option {
@@ -988,6 +1013,12 @@ body.profile-required .profile-login-copy {
 .profile-password-panel h3 {
   margin: 0;
   font-size: 16px;
+}
+
+.profile-password-panel label {
+  color: rgba(255, 255, 255, .92);
+  font-size: 14px;
+  font-weight: 700;
 }
 
 .profile-tabs button.is-active {
@@ -1279,7 +1310,8 @@ body.profile-required .profile-login-copy {
   .favorites-panel button,
   .save-panel button,
   .login-panel button,
-  .login-panel input {
+  .login-panel input,
+  .login-panel select {
     max-width: 100%;
     box-sizing: border-box;
   }

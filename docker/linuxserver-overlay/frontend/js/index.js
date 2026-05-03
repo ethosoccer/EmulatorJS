@@ -161,6 +161,21 @@ function profileRequest(body) {
     body: JSON.stringify(body)
   });
 }
+
+function applyResolvedProfileSettings(settings) {
+  if (!settings || typeof settings !== 'object') {
+    return;
+  }
+  if (Object.prototype.hasOwnProperty.call(settings, 'requireLogin')) {
+    requireMainLogin = settings.requireLogin === true;
+  }
+  if (Object.prototype.hasOwnProperty.call(settings, 'selectorStyle')) {
+    selectorStyle = settings.selectorStyle === 'popup' ? 'popup' : 'menu';
+  }
+  if (Object.prototype.hasOwnProperty.call(settings, 'launchErrorDebug')) {
+    launchErrorDebug = settings.launchErrorDebug === true;
+  }
+}
 function notifyGameStarted(details) {
   if (!localStorage.getItem('user') || !localStorage.getItem('pass')) {
     return Promise.resolve();
@@ -2423,6 +2438,7 @@ async function profileLogin() {
       localStorage.setItem('user', json.user);
       localStorage.setItem('pass', pass);
       localStorage.setItem('role', json.role || 'user');
+      applyResolvedProfileSettings(json.settings);
       $('#profile-user').val('');
       updateLoginState();
       await pullServerProfile(true);
@@ -2446,6 +2462,7 @@ async function verifyStoredProfileLogin() {
     if (json.status == 'success') {
       localStorage.setItem('user', json.user);
       localStorage.setItem('role', json.role || 'user');
+      applyResolvedProfileSettings(json.settings);
     } else {
       localStorage.removeItem('user');
       localStorage.removeItem('pass');
@@ -2469,11 +2486,14 @@ function profileLogout() {
 
 async function loadPublicSettings() {
   try {
-    var res = await profileRequest({type:'publicsettings'});
+    var requestBody = {type:'publicsettings'};
+    if (localStorage.getItem('user') && localStorage.getItem('pass')) {
+      requestBody.user = localStorage.getItem('user');
+      requestBody.pass = localStorage.getItem('pass');
+    }
+    var res = await profileRequest(requestBody);
     var json = await res.json();
-    requireMainLogin = json.status == 'success' && json.requireLogin === true;
-    selectorStyle = json.status == 'success' && json.selectorStyle === 'popup' ? 'popup' : 'menu';
-    launchErrorDebug = json.status == 'success' && json.launchErrorDebug === true;
+    applyResolvedProfileSettings(json.status == 'success' ? json : null);
   } catch(e) {
     console.log(e);
   }

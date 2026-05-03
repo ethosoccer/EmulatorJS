@@ -29,6 +29,45 @@ function roleFor(profileRecord) {
   return profileRecord && profileRecord.role === 'admin' ? 'admin' : 'user';
 }
 
+function normalizeBooleanOverride(value) {
+  if (value === true || value === 'true') {
+    return true;
+  }
+  if (value === false || value === 'false') {
+    return false;
+  }
+  return null;
+}
+
+function normalizeSelectorStyleOverride(value) {
+  if (value === 'popup') {
+    return 'popup';
+  }
+  if (value === 'menu') {
+    return 'menu';
+  }
+  return null;
+}
+
+function normalizeUserOverrides(overrides) {
+  let value = overrides && typeof overrides === 'object' ? overrides : {};
+  return {
+    requireLogin: normalizeBooleanOverride(value.requireLogin),
+    selectorStyle: normalizeSelectorStyleOverride(value.selectorStyle),
+    launchErrorDebug: normalizeBooleanOverride(value.launchErrorDebug)
+  };
+}
+
+function effectiveSettingsForProfile(profileRecord, settings) {
+  let defaults = Object.assign(defaultSettings(), settings || {});
+  let overrides = normalizeUserOverrides(profileRecord && profileRecord.settingsOverrides);
+  return {
+    requireLogin: overrides.requireLogin === null ? defaults.requireLogin === true : overrides.requireLogin === true,
+    selectorStyle: overrides.selectorStyle === null ? (defaults.selectorStyle === 'popup' ? 'popup' : 'menu') : overrides.selectorStyle,
+    launchErrorDebug: overrides.launchErrorDebug === null ? defaults.launchErrorDebug === true : overrides.launchErrorDebug === true
+  };
+}
+
 function defaultSettings() {
   return {
     requireLogin: false,
@@ -69,6 +108,16 @@ async function readProfiles() {
     }
     if (profiles[userHash].role !== 'admin' && profiles[userHash].role !== 'user') {
       profiles[userHash].role = 'user';
+      changed = true;
+    }
+    let normalizedOverrides = normalizeUserOverrides(profiles[userHash].settingsOverrides);
+    let currentOverrides = profiles[userHash].settingsOverrides || {};
+    if (
+      currentOverrides.requireLogin !== normalizedOverrides.requireLogin ||
+      currentOverrides.selectorStyle !== normalizedOverrides.selectorStyle ||
+      currentOverrides.launchErrorDebug !== normalizedOverrides.launchErrorDebug
+    ) {
+      profiles[userHash].settingsOverrides = normalizedOverrides;
       changed = true;
     }
   }
@@ -881,11 +930,23 @@ app.post('/*', async function(req, res) {
       // Send default profile unauthenticated
       if (type == 'publicsettings') {
         let settings = await readSettings();
-        res.json({
-          status: 'success',
+        let resolved = {
           requireLogin: settings.requireLogin === true,
           selectorStyle: settings.selectorStyle === 'popup' ? 'popup' : 'menu',
           launchErrorDebug: settings.launchErrorDebug === true
+        };
+        if (req.body.user && req.body.pass) {
+          let publicProfile = await readProfiles();
+          let publicHash = hashProfile(req.body.user, req.body.pass);
+          if (publicProfile.hasOwnProperty(publicHash)) {
+            resolved = effectiveSettingsForProfile(publicProfile[publicHash], settings);
+          }
+        }
+        res.json({
+          status: 'success',
+          requireLogin: resolved.requireLogin === true,
+          selectorStyle: resolved.selectorStyle === 'popup' ? 'popup' : 'menu',
+          launchErrorDebug: resolved.launchErrorDebug === true
         });
       } else if (type == 'default') {
       try {
@@ -964,10 +1025,11 @@ app.post('/*', async function(req, res) {
       let profile = await readProfiles();
       if (profile.hasOwnProperty(hash)) {
         let currentRole = roleFor(profile[hash]);
+        let settings = await readSettings();
+        let resolvedSettings = effectiveSettingsForProfile(profile[hash], settings);
         // Return username if found
         if (type == 'login') {
           if (req.body.silent !== true) {
-            let settings = await readSettings();
             await emitActivityWebhook(settings, req, {
               title: 'EmulatorJS login succeeded',
               event: 'login_success',
@@ -978,7 +1040,16 @@ app.post('/*', async function(req, res) {
               source: req.body.source || 'unknown'
             });
           }
-          res.json({status: 'success', user: profile[hash].username, role: currentRole});
+          res.json({
+            status: 'success',
+            user: profile[hash].username,
+            role: currentRole,
+            settings: {
+              requireLogin: resolvedSettings.requireLogin === true,
+              selectorStyle: resolvedSettings.selectorStyle === 'popup' ? 'popup' : 'menu',
+              launchErrorDebug: resolvedSettings.launchErrorDebug === true
+            }
+          });
         } else if (type == 'notifygameevent') {
           let settings = await readSettings();
           await emitActivityWebhook(settings, req, {
@@ -1008,7 +1079,14 @@ app.post('/*', async function(req, res) {
           }
           let users = [];
           for await (let userHash of Object.keys(profile)) {
-            users.push({username: profile[userHash].username, role: roleFor(profile[userHash])});
+            let overrides = normalizeUserOverrides(profile[userHash].settingsOverrides);
+            let effective = effectiveSettingsForProfile(profile[userHash], settings);
+            users.push({
+              username: profile[userHash].username,
+              role: roleFor(profile[userHash]),
+              settingsOverrides: overrides,
+              effectiveSettings: effective
+            });
           }
           res.json({status: 'success', users: users});
         } else if (type == 'setrole') {
@@ -1030,6 +1108,19 @@ app.post('/*', async function(req, res) {
               profile[userHash].role = role;
             }
           }
+          await writeProfiles(profile);
+          res.json({status: 'success'});
+        } else if (type == 'setuseroverrides') {
+          if (currentRole !== 'admin') {
+            res.json(error);
+            return;
+          }
+          let targetHash = findUserHash(profile, req.body.target);
+          if (!targetHash) {
+            res.json(error);
+            return;
+          }
+          profile[targetHash].settingsOverrides = normalizeUserOverrides(req.body.settingsOverrides);
           await writeProfiles(profile);
           res.json({status: 'success'});
         } else if (type == 'changepassword') {
@@ -1078,7 +1169,11 @@ app.post('/*', async function(req, res) {
             return;
           }
           let newHash = hashProfile(newUser, newPass);
-          profile[newHash] = {username: newUser, role: newRole};
+          profile[newHash] = {
+            username: newUser,
+            role: newRole,
+            settingsOverrides: normalizeUserOverrides()
+          };
           await writeProfiles(profile);
           if (!fs.existsSync(home + '/profile/' + newUser)) {
             await fsw.mkdir(home + '/profile/' + newUser);

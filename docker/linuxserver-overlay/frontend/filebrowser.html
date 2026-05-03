@@ -9,13 +9,13 @@
         document.documentElement.setAttribute('data-theme', savedTheme || (prefersDark ? 'dark' : 'light'));
       }());
     </script>
-    <link rel="stylesheet" href="css/filebrowser.css?v=20260501-launch-error-toggle">
+    <link rel="stylesheet" href="css/filebrowser.css?v=20260503-user-setting-overrides">
     <link rel="stylesheet" href="css/vendor/jquery.modal.min.css">
     <script type="text/javascript" src="js/vendor/jquery.min.js"></script>
     <script type="text/javascript" src="js/vendor/jquery.modal.min.js"></script>
     <script type="text/javascript" src="js/vendor/browserfs.min.js"></script>
     <script type="text/javascript" src="js/vendor/jszip.min.js"></script>
-    <script type="text/javascript" src="js/filebrowser.js?v=20260501-launch-error-toggle"></script>
+    <script type="text/javascript" src="js/filebrowser.js?v=20260503-user-setting-overrides"></script>
   </head>
   <body>
   <div id="popup" class="modal">
@@ -96,15 +96,15 @@
       <div class="settings-panel">
         <label class="setting-row">
           <input id="requireMainLogin" type="checkbox">
-          Require login before showing the main game browser
+          <span title="Require login before showing the main game browser">Require login</span>
         </label>
         <label class="setting-row">
           <input id="usePopupSelectors" type="checkbox">
-          Use popup game/save selectors instead of the controller-friendly full menu selector
+          <span title="Use popup game/save selectors instead of the controller-friendly full menu selector">Popup selectors</span>
         </label>
         <label class="setting-row">
           <input id="launchErrorDebug" type="checkbox">
-          Show in-game launch error overlay for debugging
+          <span title="Show in-game launch error overlay for debugging">Launch debug</span>
         </label>
         <button type="button" onclick="saveAdminSettings()">Save Settings</button>
         <input id="passwordResetWebhook" type="url" placeholder="Password reset webhook URL">

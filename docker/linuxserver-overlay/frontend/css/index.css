@@ -937,6 +937,12 @@ body.profile-required .profile-login-copy {
   align-items: stretch;
 }
 
+.favorite-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
 .favorite-remove {
   min-width: 42px;
 }
@@ -1255,10 +1261,6 @@ body.profile-required .profile-login-copy {
     flex: 1 1 140px;
   }
 
-  .favorite-result-row {
-    grid-template-columns: 1fr;
-  }
-
   .save-file-row {
     grid-template-columns: 1fr;
   }
@@ -1390,7 +1392,6 @@ body.profile-required .profile-login-copy {
     box-sizing: border-box;
   }
 
-  .favorites-panel .favorite-result-row,
   .save-panel .save-file-row {
     grid-template-columns: 1fr;
   }

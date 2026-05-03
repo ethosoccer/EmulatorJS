@@ -2976,6 +2976,8 @@ function showFavorites() {
   closeVariantPanel();
   closeInfoPanel();
   $('#favorites-panel').removeClass('hidden');
+  activeFrontPanelSelector = '#favorites-panel';
+  syncFrontPanelState();
   $('#favorites-status').text('Loading favorites...');
   $('#favorites-results').empty();
   ensureSearchCatalog().then(function() {

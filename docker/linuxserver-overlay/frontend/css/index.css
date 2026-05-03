@@ -330,6 +330,7 @@ body.gameplay #gamepad .screenGamepad-Button {
   box-shadow: 0 18px 55px rgba(0, 0, 0, .42);
   color: white;
   font-family: Arial, Helvetica, sans-serif;
+  box-sizing: border-box;
   overscroll-behavior: contain;
   touch-action: pan-y pinch-zoom;
   -webkit-overflow-scrolling: touch;
@@ -362,6 +363,10 @@ body.front-panel-open .save-panel,
 body.front-panel-open .variant-panel,
 body.front-panel-open .login-panel {
   pointer-events: auto;
+}
+
+body.front-panel-open .console-list-tools {
+  display: none;
 }
 
 .login-panel {
@@ -1234,14 +1239,22 @@ body.profile-required .profile-login-copy {
   .search-panel,
   .favorites-panel,
   .save-panel,
+  #variant-panel,
   .login-panel {
+    position: fixed;
     top: 72px;
     left: 8px;
-    width: calc(100vw - 16px);
+    right: 8px;
+    width: auto;
+    max-width: calc(100vw - 16px);
     min-width: 0;
     min-height: 180px;
     max-height: calc(100vh - 84px);
     padding: 12px;
+    resize: none;
+    overflow-x: hidden;
+    overflow-y: auto;
+    box-sizing: border-box;
   }
 
   body.profile-required .login-panel {
@@ -1288,6 +1301,7 @@ body.profile-required .profile-login-copy {
   .search-panel,
   .favorites-panel,
   .save-panel,
+  #variant-panel,
   .login-panel {
     top: 112px;
     max-height: calc(100vh - 124px);
@@ -1355,10 +1369,6 @@ body.profile-required .profile-login-copy {
     resize: none;
     box-sizing: border-box;
     overflow-x: hidden;
-  }
-
-  body.front-panel-open .console-list-tools {
-    display: none;
   }
 
   .search-panel .search-actions {

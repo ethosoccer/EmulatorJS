@@ -1033,6 +1033,56 @@ body.profile-required .profile-login-copy {
   font-weight: 700;
 }
 
+.profile-setting-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.profile-setting-label label {
+  margin: 0;
+  flex: 1 1 auto;
+}
+
+.profile-info-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  min-width: 34px;
+  min-height: 34px;
+  padding: 0;
+  border-radius: 999px;
+  color: rgba(255, 255, 255, .9);
+  background: rgba(255, 255, 255, .08);
+}
+
+.profile-info-button svg {
+  width: 16px;
+  height: 16px;
+}
+
+.profile-info-button:hover,
+.profile-info-button:focus,
+.profile-info-button.is-open {
+  background: rgba(87, 183, 198, .22);
+  border-color: rgba(96, 219, 255, .72);
+  color: #9ae9f5;
+  outline: none;
+}
+
+.profile-setting-help {
+  margin-top: -2px;
+  padding: 10px 12px;
+  border: 1px solid rgba(96, 219, 255, .26);
+  border-radius: 8px;
+  background: rgba(87, 183, 198, .12);
+  color: rgba(255, 255, 255, .82);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 .profile-tabs button.is-active {
   border-color: rgba(143, 214, 255, .75);
   background: rgba(143, 214, 255, .18);

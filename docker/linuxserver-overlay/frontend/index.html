@@ -6,12 +6,12 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="apple-touch-icon" href="icon.png" crossorigin="use-credentials">
     <link rel="manifest" href="manifest.json" crossorigin="use-credentials">
-<link rel="stylesheet" href="css/index.css?v=20260503-profile-option-colors">
+<link rel="stylesheet" href="css/index.css?v=20260503-profile-help-icons">
     <script src="js/vendor/jquery.min.js"></script>
     <script src="js/vendor/hammer.min.js"></script>
     <script src="js/vendor/browserfs.min.js"></script>
     <script src="js/vendor/jszip.min.js"></script>
-<script src="js/index.js?v=20260503-profile-option-colors"></script>
+<script src="js/index.js?v=20260503-profile-help-icons"></script>
   </head>
   <body>
     <div id="menu">
@@ -110,13 +110,31 @@
             </div>
             <div class="profile-password-panel">
               <h3>Preferences</h3>
-              <label for="profile-selector-style" title="Use popup game/save selectors instead of the controller-friendly full menu selector">Popup selectors</label>
+              <div class="profile-setting-label">
+                <label for="profile-selector-style" title="Use popup game/save selectors instead of the controller-friendly full menu selector">Popup selectors</label>
+                <button class="profile-info-button" type="button" aria-label="About popup selectors" aria-expanded="false" onclick="toggleProfileSettingHelp('selector-style', this)">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">
+                    <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14m0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16"/>
+                    <path d="m8.93 6.588-2.29.287-.082.38.45.083c.294.07.352.176.288.469l-.738 3.468c-.194.897.105 1.319.808 1.319.545 0 1.178-.252 1.465-.598l.088-.416c-.2.176-.492.246-.686.246-.275 0-.375-.193-.304-.533zM9 4.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0"/>
+                  </svg>
+                </button>
+              </div>
+              <div id="profile-help-selector-style" class="profile-setting-help hidden">Use popup game/save selectors instead of the controller-friendly full menu selector.</div>
               <select id="profile-selector-style">
                 <option value="">Default</option>
                 <option value="menu">Menu</option>
                 <option value="popup">Popup</option>
               </select>
-              <label for="profile-launch-debug" title="Show in-game launch error overlay for debugging">Launch debug</label>
+              <div class="profile-setting-label">
+                <label for="profile-launch-debug" title="Show in-game launch error overlay for debugging">Launch debug</label>
+                <button class="profile-info-button" type="button" aria-label="About launch debug" aria-expanded="false" onclick="toggleProfileSettingHelp('launch-debug', this)">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">
+                    <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14m0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16"/>
+                    <path d="m8.93 6.588-2.29.287-.082.38.45.083c.294.07.352.176.288.469l-.738 3.468c-.194.897.105 1.319.808 1.319.545 0 1.178-.252 1.465-.598l.088-.416c-.2.176-.492.246-.686.246-.275 0-.375-.193-.304-.533zM9 4.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0"/>
+                  </svg>
+                </button>
+              </div>
+              <div id="profile-help-launch-debug" class="profile-setting-help hidden">Show in-game launch error overlay for debugging.</div>
               <select id="profile-launch-debug">
                 <option value="">Default</option>
                 <option value="true">On</option>

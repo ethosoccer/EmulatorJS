@@ -2334,7 +2334,23 @@ function showProfileTab(tab) {
 function setProfileStatus(message) {
   $('#profile-status').text(message || '');
 }
+function closeProfileSettingHelp() {
+  $('.profile-setting-help').addClass('hidden');
+  $('.profile-info-button').attr('aria-expanded', 'false').removeClass('is-open');
+}
+function toggleProfileSettingHelp(key, button) {
+  var helpId = '#profile-help-' + key;
+  var isOpen = !$(helpId).hasClass('hidden');
+  closeProfileSettingHelp();
+  if (!isOpen) {
+    $(helpId).removeClass('hidden');
+    if (button) {
+      $(button).attr('aria-expanded', 'true').addClass('is-open');
+    }
+  }
+}
 async function saveProfileSettings() {
+  closeProfileSettingHelp();
   setProfileStatus('Saving preferences...');
   try {
     var selectorValue = $('#profile-selector-style').val();
@@ -2463,6 +2479,7 @@ function openLoginPanel() {
   closeFavoritesPanel();
   closeSavePanel();
   closeVariantPanel();
+  closeProfileSettingHelp();
   $('#login-panel').removeClass('hidden');
   updateLoginState();
   focusFrontPanel('#login-panel', '#profile-user, button');
@@ -2471,6 +2488,7 @@ function closeLoginPanel() {
   if (requireMainLogin && !localStorage.getItem('user')) {
     return;
   }
+  closeProfileSettingHelp();
   $('#login-panel').addClass('hidden');
   clearFrontPanelFocus('#login-panel');
 }
@@ -2528,6 +2546,7 @@ function profileLogout() {
   localStorage.removeItem('user');
   localStorage.removeItem('pass');
   localStorage.removeItem('role');
+  closeProfileSettingHelp();
   applyProfileSettingsOverrides();
   clearInterval(profilePushTimer);
   profilePushTimer = null;

@@ -52,7 +52,6 @@ function normalizeSelectorStyleOverride(value) {
 function normalizeUserOverrides(overrides) {
   let value = overrides && typeof overrides === 'object' ? overrides : {};
   return {
-    requireLogin: normalizeBooleanOverride(value.requireLogin),
     selectorStyle: normalizeSelectorStyleOverride(value.selectorStyle),
     launchErrorDebug: normalizeBooleanOverride(value.launchErrorDebug)
   };
@@ -62,7 +61,7 @@ function effectiveSettingsForProfile(profileRecord, settings) {
   let defaults = Object.assign(defaultSettings(), settings || {});
   let overrides = normalizeUserOverrides(profileRecord && profileRecord.settingsOverrides);
   return {
-    requireLogin: overrides.requireLogin === null ? defaults.requireLogin === true : overrides.requireLogin === true,
+    requireLogin: defaults.requireLogin === true,
     selectorStyle: overrides.selectorStyle === null ? (defaults.selectorStyle === 'popup' ? 'popup' : 'menu') : overrides.selectorStyle,
     launchErrorDebug: overrides.launchErrorDebug === null ? defaults.launchErrorDebug === true : overrides.launchErrorDebug === true
   };
@@ -113,7 +112,6 @@ async function readProfiles() {
     let normalizedOverrides = normalizeUserOverrides(profiles[userHash].settingsOverrides);
     let currentOverrides = profiles[userHash].settingsOverrides || {};
     if (
-      currentOverrides.requireLogin !== normalizedOverrides.requireLogin ||
       currentOverrides.selectorStyle !== normalizedOverrides.selectorStyle ||
       currentOverrides.launchErrorDebug !== normalizedOverrides.launchErrorDebug
     ) {

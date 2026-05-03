@@ -8,7 +8,6 @@ var mfs = new BrowserFS.FileSystem.MountableFileSystem();
 var postSettings = {method:'POST',headers:{Accept:'application/json','Content-Type':'application/json'}};
 var favoritesProfileFile = '.emulatorjs-favorites.json';
 var userOverrideHelp = {
-  requireLogin: 'Require login before showing the main game browser',
   selectorStyle: 'Use popup game/save selectors instead of the controller-friendly full menu selector',
   launchErrorDebug: 'Show in-game launch error overlay for debugging'
 };
@@ -549,7 +548,6 @@ async function loadUsers() {
     {label: 'Username'},
     {label: 'Role'},
     {label: 'Password'},
-    {label: 'Login', title: userOverrideHelp.requireLogin},
     {label: 'Selectors', title: userOverrideHelp.selectorStyle},
     {label: 'Launch', title: userOverrideHelp.launchErrorDebug},
     {label: 'Action'}
@@ -571,14 +569,12 @@ async function loadUsers() {
       passInput.val('');
     });
     let overrides = user.settingsOverrides || {};
-    let loginSelect = booleanOverrideSelect(overrides.requireLogin, userOverrideHelp.requireLogin);
     let selectorSelect = selectorOverrideSelect(overrides.selectorStyle, userOverrideHelp.selectorStyle);
     let launchSelect = booleanOverrideSelect(overrides.launchErrorDebug, userOverrideHelp.launchErrorDebug);
     let save = $('<button>').text('Save User').attr('title', 'Save role and override settings').on('click', async function() {
       await saveUserSettings(user.username, {
         role: roleSelect.val(),
         settingsOverrides: {
-          requireLogin: readBooleanOverrideValue(loginSelect.val()),
           selectorStyle: selectorSelect.val() || null,
           launchErrorDebug: readBooleanOverrideValue(launchSelect.val())
         }
@@ -588,7 +584,6 @@ async function loadUsers() {
       $('<td>').text(user.username),
       $('<td>').append(roleSelect),
       $('<td>').append(passInput, passButton),
-      $('<td>').append(loginSelect),
       $('<td>').append(selectorSelect),
       $('<td>').append(launchSelect),
       $('<td>').append(save)

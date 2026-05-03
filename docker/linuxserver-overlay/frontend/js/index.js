@@ -2847,6 +2847,7 @@ function openMenuInfo(event, button) {
 }
 function openSearchPanel() {
   closeFavoritesPanel();
+  closeLoginPanel();
   closeSavePanel();
   closeVariantPanel();
   closeInfoPanel();
@@ -2879,6 +2880,7 @@ function clearGameSearch() {
 }
 function showFavorites() {
   closeSearchPanel();
+  closeLoginPanel();
   closeSavePanel();
   closeVariantPanel();
   closeInfoPanel();

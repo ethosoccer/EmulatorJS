@@ -340,7 +340,19 @@ body.front-panel-open {
 }
 
 body.front-panel-open #menu {
+  pointer-events: auto;
+}
+
+body.front-panel-open .page-container,
+body.front-panel-open #games-list,
+body.front-panel-open #background,
+body.front-panel-open #corner,
+body.front-panel-open #bgvid {
   pointer-events: none;
+}
+
+body.front-panel-open .menu-toolbar {
+  pointer-events: auto;
 }
 
 body.front-panel-open .search-panel,

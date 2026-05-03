@@ -3745,9 +3745,14 @@ function launch(active_item) {
     window.location.href = '#game';
     $(document).off('keydown');
     // Default variables for emulator
+    var path =  readDataAttr(selected, 'path');
     var emulator = readDataAttr(selected, 'emulator');
     if (emulator.startsWith('libretro-')) {
       var emulator = emulator.replace('libretro-','');
+      if (path === 'psx' && emulator === 'mednafen_psx') {
+        console.log('Remapping legacy PSX core mednafen_psx to pcsx_rearmed for compatibility');
+        emulator = 'pcsx_rearmed';
+      }
       var script = 'js/libretro.js'
       var EJSemu = false;
       EJS_onGameStart = function() {
@@ -3764,7 +3769,6 @@ function launch(active_item) {
         document.querySelectorAll('[data-btn="fullscreen"]')[0].click();
       }
     };
-    var path =  readDataAttr(selected, 'path');
     var rom_path = 'user/' + path + '/roms/';
     var rom_extension = readDataAttr(selected, 'rom_extension');
     var gameSaveName = name + rom_extension;
@@ -3913,7 +3917,7 @@ function launch(active_item) {
       } else {
         if ((emulator == 'gearboy') || (emulator == 'fceumm') || (emulator == 'mednafen_vb') || (emulator == 'gambatte') || (emulator == 'stella2014') || (emulator == 'prosystem') || (emulator == 'mednafen_pce_fast')) {
           gamePadType = 'simple';
-        } else if ((emulator == 'prboom') || (emulator == 'mednafen_psx') || (emulator == 'tyrquake') || (emulator == 'melonds') || (emulator == 'melonds_threaded')) {
+        } else if ((emulator == 'prboom') || (emulator == 'mednafen_psx') || (emulator == 'pcsx_rearmed') || (emulator == 'tyrquake') || (emulator == 'melonds') || (emulator == 'melonds_threaded')) {
           gamePadType = 'modern';
 	} else if (emulator == 'mupen64plus_next') {
           gamePadType = 'n64';

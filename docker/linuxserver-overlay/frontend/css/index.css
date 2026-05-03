@@ -1231,6 +1231,15 @@ body.profile-required .profile-login-copy {
 }
 
 @media (max-width: 900px) and (orientation: landscape) {
+  .console-list-tools {
+    top: 68px;
+  }
+
+  .console-filter-active .games-list {
+    top: 130px;
+    height: calc(100vh - 130px);
+  }
+
   .search-panel,
   .favorites-panel,
   .save-panel,

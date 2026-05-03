@@ -1219,7 +1219,11 @@ body.profile-required .profile-login-copy {
 }
 
 @media (max-width: 900px) and (orientation: landscape) {
-  .search-panel {
+  .search-panel,
+  .favorites-panel,
+  .save-panel,
+  #variant-panel,
+  .login-panel {
     top: 72px;
     left: 8px;
     right: 8px;
@@ -1232,16 +1236,53 @@ body.profile-required .profile-login-copy {
     overflow-x: hidden;
   }
 
+  body.front-panel-open .console-list-tools {
+    display: none;
+  }
+
   .search-panel .search-actions {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .favorites-panel .search-actions,
+  .save-panel .search-actions,
+  .login-panel .search-actions {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+  }
+
   .search-panel button,
   .search-panel input,
-  .search-panel select {
+  .search-panel select,
+  .favorites-panel button,
+  .save-panel button,
+  .login-panel button,
+  .login-panel input {
     max-width: 100%;
     box-sizing: border-box;
+  }
+
+  .favorites-panel .search-result,
+  .save-panel .search-result,
+  .login-panel .search-result {
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .favorites-panel .favorite-result-row,
+  .save-panel .save-file-row {
+    grid-template-columns: 1fr;
+  }
+
+  .login-panel .profile-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .login-panel #profile-name,
+  .favorites-panel .search-result-title,
+  .save-panel .search-result-title {
+    overflow-wrap: anywhere;
   }
 
   #menu.console-route-mobile-active #active-list {

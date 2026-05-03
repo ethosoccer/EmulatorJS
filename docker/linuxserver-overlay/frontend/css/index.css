@@ -1218,6 +1218,47 @@ body.profile-required .profile-login-copy {
   }
 }
 
+@media (max-width: 900px) and (orientation: landscape) {
+  #menu.console-route-mobile-active #active-list {
+    left: auto;
+    right: 8px;
+    width: min(48vw, 360px);
+    max-width: calc(100vw - 16px);
+  }
+
+  #menu.console-route-mobile-active #console-list-tools.hidden + #active-list {
+    left: auto;
+    right: 8px;
+    width: min(48vw, 360px);
+    max-width: calc(100vw - 16px);
+  }
+
+  #menu.console-route-mobile-active .menu-div {
+    display: flex;
+    justify-content: flex-end;
+  }
+
+  #menu.console-route-mobile-active .menu-wrap {
+    justify-content: flex-end;
+  }
+
+  #menu.console-route-mobile-active .menu-wrap a {
+    margin-left: auto;
+    margin-right: 0;
+    text-align: right;
+  }
+
+  #menu.console-route-mobile-active .menu-text {
+    align-items: flex-end;
+  }
+
+  #menu.console-route-mobile-active .menu-img {
+    margin-left: auto;
+    margin-right: 0;
+    text-align: right;
+  }
+}
+
 @keyframes growonce {
   0% {
     transform: scale(.5,.5) translate(15vw,0);

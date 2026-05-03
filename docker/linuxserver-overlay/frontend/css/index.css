@@ -1257,13 +1257,14 @@ body.profile-required .profile-login-copy {
   .login-panel {
     position: fixed;
     top: 72px;
+    bottom: 12px;
     left: 8px;
     right: 8px;
     width: auto;
     max-width: calc(100vw - 16px);
     min-width: 0;
     min-height: 180px;
-    max-height: calc(100vh - 84px);
+    max-height: none;
     padding: 12px;
     resize: none;
     overflow-x: hidden;
@@ -1318,7 +1319,8 @@ body.profile-required .profile-login-copy {
   #variant-panel,
   .login-panel {
     top: 112px;
-    max-height: calc(100vh - 124px);
+    bottom: 8px;
+    max-height: none;
   }
 
   body.profile-required .login-panel {
@@ -1374,12 +1376,13 @@ body.profile-required .profile-login-copy {
   #variant-panel,
   .login-panel {
     top: 72px;
+    bottom: 12px;
     left: 8px;
     right: 8px;
     width: auto;
     min-width: 0;
     max-width: calc(100vw - 16px);
-    max-height: calc(100vh - 84px);
+    max-height: none;
     resize: none;
     box-sizing: border-box;
     overflow-x: hidden;

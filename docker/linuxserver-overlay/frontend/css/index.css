@@ -1059,8 +1059,8 @@ body.profile-required .profile-login-copy {
   }
 
   #menu.console-route-mobile-active #active-list {
-    top: 196px;
-    height: calc(100vh - 196px);
+    top: 115px;
+    height: calc(100vh - 115px);
   }
 
   #menu.console-route-mobile-active #console-list-tools.hidden + #active-list {

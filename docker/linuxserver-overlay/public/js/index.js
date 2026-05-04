@@ -9,7 +9,8 @@ var adminSocketPaths = Array.from(new Set([adminSocketPath(), '/socket.io']));
 var adminSocketPathIndex = 0;
 var socket = io({
   path: adminSocketPaths[adminSocketPathIndex],
-  withCredentials: true
+  withCredentials: true,
+  transports: ['websocket']
 });
 var adminReady = false;
 var logFilters = {sinceDays: '7', eventType: 'all', status: 'all', username: '', search: '', limit: 200};

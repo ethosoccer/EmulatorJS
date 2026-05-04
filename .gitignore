@@ -12,6 +12,8 @@ data/cores/*
 .vscode/*
 !.vscode/settings.json
 !.vscode/extensions.json
+__pycache__/
+*.py[cod]
 *.tgz
 dist/
 jsdoc/

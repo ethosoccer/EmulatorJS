@@ -54,8 +54,9 @@
       <div class="readme">
         <h2>Support</h2>
 	<p>For general support please use our <a href="https://discord.gg/YWrKVTn">Discord Server</a>, if you would like to report a bug or have a feature request please do that on <a href="https://github.com/linuxserver/emulatorjs/issues">GitHub</a>.</p>
-        <p>If you are upgrading from previous versions and not seeing a performance increase please do a hard reload on your browser and delete the retroarch.cfg file from the file browser icon (top left of frontent interface folder icon).</p>
-        <p>If you are upgrading from previous versions the n64 core has been switched to a libretro core you will need to change the config file to have '"emulator": "libretro-mupen64plus_next"' under the defaults section of the n64 config to use the new core.</p>
+        <p>This admin interface is now served from the built-in <span style="background-color:silver;">/admin/</span> route. In most reverse proxy setups you should proxy the main site normally and let the container handle <span style="background-color:silver;">/admin/</span>, <span style="background-color:silver;">/admin/socket.io/</span>, and the related file/profile routes internally.</p>
+        <p>After updating the frontend or admin interface, do a hard refresh in your browser. If emulator behavior seems stuck on an older configuration, clearing the cached <span style="background-color:silver;">retroarch.cfg</span> from the file browser can still help.</p>
+        <p>User management now supports global defaults plus per-user overrides for selector style and launch-debug behavior. Users can also adjust those same preferences from the frontend profile menu.</p>
         <h2>Basic controls</h2>
         <p>For all libretro based emulators you can use F1 on your keyboard, start+select+L+R on a gamepad , or the touch button on the top left in touchscreen devices to bring up the in game menu.</p>
         <p>All saves and any settings are stored in your actual web browser by the URL you are using to access this container, to ensure sram is dumped on exit always try to exit the game with back instead of closing the browser window. On libretro based emulators you can perform saves and savestates from the menu.</p>
@@ -75,17 +76,19 @@
         <p>Threaded Saturn is available but requires you serve the content from an HTTPS endpoint which means you will need to put this application behind a reverse proxy, we highly recommend <a href="https://github.com/linuxserver/docker-swag">SWAG</a> to achieve this. The non threaded emulator is essentially useless unless running some 2D games, threaded many titles run full speed especially on Xbox, if you find any game lacking try setting the threads to 8 in the RetorArch options menu.</p>
         <p>To enable this emulator just change <span style="background-color:silver;">"emulator": "libretro-yabause"</span> to <span style="background-color:silver;">"emulator": "libretro-yabause_threaded"</span> in the config file.</p>
         <h2>File Downloading</h2>
-        <p>As the network of peers grows, art and default file downloading might not be a 100% perfect. You can always click download multiple times, items that have allready been downloaded will pull from your local IPFS node running in this container while missing items will be retried. Please try to download a couple times before reaching out for support. If you are able to we would appreciate if you can forward port 4001 from this container to the public internet, it decentralizes the distribution of files leading to a more robust CDN for all users.</p>
+        <p>Art and default file downloads use IPFS with local caching and retry logic. If a download is incomplete, re-running the download action will reuse local files and retry only the missing items. If you are able to forward port 4001 from this container to the public internet it helps decentralize distribution and improves file availability for everyone.</p>
         <h2>Rom Identification basics</h2>
         <p>The basic steps for scanning in roms is:</p>
         <ol>
           <li>Place the roms in the "roms" directory for your system in your mounted /data/ directory.</li>
-          <li>Click on the corresponding scan button above.</li>
-          <li>Open the item from the menu on the left.</li>
+          <li>Click the corresponding scan button above and choose whether to scan new items or everything.</li>
+          <li>Optionally set a preferred scan region before starting a scan.</li>
+          <li>Open the item from the menu on the left to review identified and unidentified results.</li>
           <li>If any of your roms are unidentified take the time to link them to the correct rom name.</li>
           <li>Click to download all the art items for your identified roms.(logos, videos, etc)</li>
           <li>Click to add the roms to your config file for that system.</li>
         </ol>
+        <p>Scan jobs and scan history are tracked in the Scans tab. Active transfers or sync tools can temporarily leave partial files or directories in a rom folder; the scanner now skips non-file artifacts, but letting large transfers finish before a full scan will still produce the cleanest results.</p>
         <p>From there you can hop into the frontend interface (default port 80) to browse and play your collection.</p>
         <p>In general this application is referencing metadata based on commonly used identifying metrics for rom files, mostly these revolve around checksums (specifically sha1) of the rom files themselves. This metadata is compiled from lists on no-intro.org for roms and redump.org for CD based games. Now no system is perfect, but the aim is to have community participation expand these lists with the data from their own rom sets. After scanning in your roms you may notice that many of them are un-identified using this metadata, if you took the time to link them to the correct reference information please consider providing your resulting reference data to Github <a href="https://github.com/linuxserver/emulatorjs">Here</a>.</p>
         <h2>Rom Hacks Support</h2>

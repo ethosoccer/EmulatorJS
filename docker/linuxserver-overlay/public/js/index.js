@@ -5,8 +5,10 @@ var path = window.location.pathname;
 function adminSocketPath() {
   return (path.endsWith('/') ? path : path + '/') + 'socket.io';
 }
+var adminSocketPaths = Array.from(new Set([adminSocketPath(), '/socket.io']));
+var adminSocketPathIndex = 0;
 var socket = io({
-  path: adminSocketPath(),
+  path: adminSocketPaths[adminSocketPathIndex],
   withCredentials: true
 });
 var adminReady = false;
@@ -130,6 +132,20 @@ function syncAdminSession(silent) {
   socket.emit('adminsession');
 }
 
+function advanceAdminSocketPath() {
+  if (adminSocketPathIndex >= adminSocketPaths.length - 1) {
+    return false;
+  }
+  adminSocketPathIndex += 1;
+  var nextPath = adminSocketPaths[adminSocketPathIndex];
+  if (socket.io && socket.io.opts) {
+    socket.io.opts.path = nextPath;
+  }
+  socket.disconnect();
+  socket.connect();
+  return true;
+}
+
 function preferredRegionKey(folder) {
   return 'ejs-scan-region-' + folder;
 }
@@ -246,6 +262,19 @@ socket.on('disconnect', function() {
   if (adminReady) {
     setAdminStatus('Connection lost. Reconnecting...', true);
   }
+});
+
+socket.on('connect_error', function(error) {
+  var message = error && error.message ? String(error.message) : '';
+  if (advanceAdminSocketPath()) {
+    setAdminStatus('Retrying admin connection...', true);
+    console.log('Retrying admin socket with fallback path:', adminSocketPaths[adminSocketPathIndex], message);
+    return;
+  }
+  if (adminReady) {
+    setAdminStatus('Admin connection error. Retrying...', true);
+  }
+  console.log('Admin socket connection error:', message || error);
 });
 
 //// Socket recieves ////

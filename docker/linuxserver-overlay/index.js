@@ -485,7 +485,7 @@ async function autoIdentifyPreferredRegion(dir, preferredRegion) {
     let parsed = canonicalVariantInfo(record.name);
     return {sha: metaSha, record: record, parsed: parsed};
   }).filter(Boolean);
-  let files = await fsw.readdir(shaPath);
+  let files = await listShaFiles(dir);
   let linked = 0;
   for await (let file of files) {
     let romFile = file.replace('.sha1', '');
@@ -1116,6 +1116,36 @@ function countRomFiles(dir) {
   }).length;
 }
 
+async function listShaFiles(dir) {
+  let shaDir = hashPath + dir + '/roms/';
+  if (!fs.existsSync(shaDir)) {
+    return [];
+  }
+  let entries = await fsw.readdir(shaDir, { withFileTypes: true });
+  return entries
+    .filter(function(entry) {
+      return entry.isFile() && entry.name.endsWith('.sha1');
+    })
+    .map(function(entry) {
+      return entry.name;
+    });
+}
+
+async function listRomFiles(dir) {
+  let romDir = dataRoot + dir + '/roms/';
+  if (!fs.existsSync(romDir)) {
+    return [];
+  }
+  let entries = await fsw.readdir(romDir, { withFileTypes: true });
+  return entries
+    .filter(function(entry) {
+      return entry.isFile();
+    })
+    .map(function(entry) {
+      return entry.name;
+    });
+}
+
 function countMissingHashes(dir) {
   let romDir = dataRoot + dir + '/roms/';
   let shaDir = hashPath + dir + '/roms/';
@@ -1440,11 +1470,11 @@ io.on('connection', async function (socket) {
       var hashCount = 0;
       var romPath = dataRoot + emu.name + '/roms/';
       if (fs.existsSync(hashPath + emu.name)) {
-        var hashes = await fsw.readdir(hashPath + emu.name + '/roms/');
+        var hashes = await listShaFiles(emu.name);
         var hashCount = hashes.length;
       };
       if (fs.existsSync(romPath)) {
-        var roms = await fsw.readdir(romPath);
+        var roms = await listRomFiles(emu.name);
         var romCount = roms.length;
       };
       romData[emu.name] = {'roms': romCount,'hashes': hashCount};
@@ -1699,7 +1729,7 @@ io.on('connection', async function (socket) {
   async function getRoms(dir) {
     let metaData = await getMeta(dir);
     let shaPath = hashPath + dir + '/roms/';
-    let files = await fsw.readdir(shaPath);
+    let files = await listShaFiles(dir);
     let identified = {};
     let unidentified = {};
     let metaVars = [];
@@ -1823,7 +1853,7 @@ io.on('connection', async function (socket) {
         ensureScanNotCanceled(job);
         var romPath = dataRoot + 'hashes/' + dir.name + '/roms/';
         if (fs.existsSync(romPath)) {
-          var roms = await fsw.readdir(romPath);
+          var roms = await listShaFiles(dir.name);
           if (roms.length > 0) {
             appendScanJobLog(job, 'Processing config for ' + dir.name);
             await addToConfig(dir.name, true);
@@ -1924,7 +1954,7 @@ io.on('connection', async function (socket) {
     // Update config file with current rom files
     let configFile = configPath + dir + '.json';
     let shaPath = hashPath + dir + '/roms/';
-    let files = await fsw.readdir(shaPath);
+    let files = await listShaFiles(dir);
     let config = await fsw.readFile(configFile, 'utf8');
     config = JSON.parse(config);
     config.items = {};
@@ -1946,7 +1976,7 @@ io.on('connection', async function (socket) {
       config.items[name] = {};
       var multi_disc = 0;
       if (fileExtension == '.disk1') {
-        var roms = await fsw.readdir(dataRoot + dir + '/roms/');
+        var roms = await listRomFiles(dir);
         for await (var rom of roms) {
           var romExtension = path.extname(rom);
           var romName = path.basename(rom, romExtension);
@@ -1991,7 +2021,7 @@ io.on('connection', async function (socket) {
     for await (var emu of emus) {
       var emuPath = dataRoot + 'hashes/' + emu.name + '/roms/';
       if (fs.existsSync(emuPath)) {
-        var roms = await fsw.readdir(emuPath);
+        var roms = await listShaFiles(emu.name);
         if (roms.length > 0) {
           main.items[emu.name] = {'video_position': emu.video_position};
         };
@@ -2037,7 +2067,7 @@ io.on('connection', async function (socket) {
     return await executeScanJob('art-download', dir, mode, 'Art download for ' + dir, async function(job) {
       var metaData = await getMeta(dir);
       var shaPath = hashPath + dir + '/roms/';
-      var files = await fsw.readdir(shaPath);
+      var files = await listShaFiles(dir);
       var artCache = {};
       var totalItems = files.length;
       var downloadedCount = 0;

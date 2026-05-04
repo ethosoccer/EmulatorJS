@@ -879,6 +879,10 @@ function adminCookieFlags(req) {
   return 'Path=' + baseUrl + '; SameSite=Strict; HttpOnly' + (isSecure ? '; Secure' : '');
 }
 
+function serializeAdminSession(session) {
+  return session ? {user: session.user, role: session.role} : null;
+}
+
 function sendWebhook(url, payload) {
   return new Promise(function(resolve, reject) {
     try {
@@ -1312,6 +1316,19 @@ baserouter.post('/adminlogout', function(req, res) {
   res.setHeader('Set-Cookie', 'ejs_admin_session=; ' + adminCookieFlags(req) + '; Max-Age=0');
   res.json({status: 'success'});
 });
+baserouter.get('/adminsession', function(req, res) {
+  if (!isTrustedOrigin(req)) {
+    res.status(403).json({status: 'error'});
+    return;
+  }
+  let token = adminTokenFromRequest(req);
+  let session = token && adminSessions.get(token);
+  if (!isAdminSession(token) || !session) {
+    res.status(403).json({status: 'error'});
+    return;
+  }
+  res.json(Object.assign({status: 'success'}, serializeAdminSession(session)));
+});
 baserouter.post('/profileapi', function(req, res) {
   if (!isTrustedOrigin(req)) {
     res.status(403).json({status: 'error'});
@@ -1353,8 +1370,19 @@ http.listen(3000);
 io = socketIO(http, {path: baseUrl + 'socket.io',maxHttpBufferSize: 100000000});
 io.on('connection', async function (socket) {
   let sessionToken = adminTokenFromRequest(socket.request || {headers: {}});
-  let existingSession = sessionToken && adminSessions.get(sessionToken);
-  socket.adminAuthenticated = isAdminSession(sessionToken);
+  let existingSession = null;
+  socket.adminAuthenticated = false;
+
+  function refreshSocketAdminSession() {
+    sessionToken = adminTokenFromRequest(socket.request || {headers: {}});
+    let session = sessionToken && adminSessions.get(sessionToken);
+    let valid = !!session && isAdminSession(sessionToken);
+    socket.adminAuthenticated = valid;
+    existingSession = valid ? {user: session.user, role: session.role, created: session.created} : null;
+    return valid;
+  }
+
+  refreshSocketAdminSession();
 
   async function renderInitialAdminPage() {
     if (fs.existsSync(dataRoot + 'config/main.json')) {
@@ -1366,7 +1394,7 @@ io.on('connection', async function (socket) {
 
   function requireAdmin(handler) {
     return async function(data) {
-      if (!socket.adminAuthenticated) {
+      if (!socket.adminAuthenticated && !refreshSocketAdminSession()) {
         socket.emit('adminauth', {status: 'error'});
         return;
       }
@@ -1477,6 +1505,10 @@ io.on('connection', async function (socket) {
     socket.emit('scanjobs', currentSerializedScanJobs());
   }
 
+  function emitScanHistoryRefresh() {
+    socket.emit('scanhistoryupdated');
+  }
+
   function emitScanJobStarted(status, job, message) {
     socket.emit('scanjobstarted', {
       status: status,
@@ -1511,6 +1543,7 @@ io.on('connection', async function (socket) {
       }
     }
     await persistAndForwardScan(job);
+    emitScanHistoryRefresh();
     return job;
   }
 
@@ -2417,6 +2450,19 @@ io.on('connection', async function (socket) {
     emitScanJobsToSocket();
     await renderInitialAdminPage();
   }
+  socket.on('adminsession', async function() {
+    try {
+      if (refreshSocketAdminSession() && existingSession) {
+        socket.emit('adminauth', {status: 'success', user: existingSession.user, role: existingSession.role});
+        emitScanJobsToSocket();
+        return;
+      }
+      socket.emit('adminauth', {status: 'error'});
+    } catch (e) {
+      console.log(e);
+      socket.emit('adminauth', {status: 'error'});
+    }
+  });
   socket.on('adminauth', async function(data) {
     try {
       if (!consumeRateLimit(socketAdminAuthAttempts, socket.handshake.address || 'unknown', ADMIN_AUTH_LIMIT, RATE_LIMIT_WINDOW_MS)) {

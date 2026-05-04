@@ -2,7 +2,13 @@ var host = window.location.hostname;
 var port = window.location.port;
 var protocol = window.location.protocol;
 var path = window.location.pathname;
-var socket = io(protocol + '//' + host + ':' + port, { path: path + 'socket.io'});
+function adminSocketPath() {
+  return (path.endsWith('/') ? path : path + '/') + 'socket.io';
+}
+var socket = io({
+  path: adminSocketPath(),
+  withCredentials: true
+});
 var adminReady = false;
 var logFilters = {sinceDays: '7', eventType: 'all', status: 'all', username: '', search: '', limit: 200};
 var logTimezoneStorageKey = 'ejs-admin-log-timezone';
@@ -114,6 +120,16 @@ function adminEndpoint(name) {
   return basePath + name;
 }
 
+function syncAdminSession(silent) {
+  if (localStorage.getItem('role') !== 'admin') {
+    return;
+  }
+  if (!silent) {
+    setAdminStatus('Restoring admin session...');
+  }
+  socket.emit('adminsession');
+}
+
 function preferredRegionKey(folder) {
   return 'ejs-scan-region-' + folder;
 }
@@ -219,6 +235,17 @@ $(function() {
     authenticateAdmin($('#admin-login-user').val(), $('#admin-login-pass').val(), false);
   });
   $('#admin-login-user').val(localStorage.getItem('user') || '');
+  syncAdminSession(true);
+});
+
+socket.on('connect', function() {
+  syncAdminSession(true);
+});
+
+socket.on('disconnect', function() {
+  if (adminReady) {
+    setAdminStatus('Connection lost. Reconnecting...', true);
+  }
 });
 
 //// Socket recieves ////
@@ -232,6 +259,13 @@ socket.on('adminauth', function(result) {
   } else if (!adminReady) {
     $('body').addClass('admin-locked');
     setAdminStatus('Admin login required.', true);
+  } else {
+    setAdminStatus('Admin session unavailable. Trying to reconnect...', true);
+  }
+});
+socket.on('scanhistoryupdated', function() {
+  if ($('#main').data('view') === 'scans') {
+    socket.emit('renderscans');
   }
 });
 // Render config

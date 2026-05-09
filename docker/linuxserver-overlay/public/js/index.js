@@ -1406,6 +1406,7 @@ function renderLogsPage(payload) {
     .append($('<option>').attr('value', 'admin_login_failed').text('Admin login failed'))
     .append($('<option>').attr('value', 'admin_login_throttled').text('Admin login throttled'))
     .append($('<option>').attr('value', 'game_started').text('Game started'))
+    .append($('<option>').attr('value', 'game_launch_failed').text('Game launch failed'))
     .append($('<option>').attr('value', 'password_reset_requested').text('Password reset'))
     .append($('<option>').attr('value', 'influx_test').text('Influx test')).val(logFilters.eventType || 'all')));
   filterGrid.append($('<label>').text('Status').append($('<select>').attr('id', 'logStatus')

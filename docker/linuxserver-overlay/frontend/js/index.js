@@ -47,6 +47,10 @@ var requireMainLogin = false;
 var selectorStyle = 'menu';
 var launchErrorDebug = false;
 var selectorMenuStack = [];
+var currentLaunchContext = null;
+var launchFailureTimer = null;
+var launchStarted = false;
+var launchFailureReported = false;
 var selectorRouteMap = {
   variant: '#selector-game',
   save: '#selector-save'
@@ -217,6 +221,63 @@ function notifyGameStarted(details) {
   }).catch(function(e) {
     console.log('Unable to notify game start', e);
   });
+}
+function notifyGameLaunchFailure(details) {
+  if (!localStorage.getItem('user') || !localStorage.getItem('pass')) {
+    return Promise.resolve();
+  }
+  return profileRequest({
+    type: 'notifygamelaunchfailure',
+    user: localStorage.getItem('user'),
+    pass: localStorage.getItem('pass'),
+    source: 'frontend',
+    gameName: details && details.gameName || '',
+    gameFile: details && details.gameFile || '',
+    console: details && details.console || '',
+    consoleTitle: details && details.consoleTitle || '',
+    path: details && details.path || '',
+    emulator: details && details.emulator || '',
+    romExtension: details && details.romExtension || '',
+    gameUrl: details && details.gameUrl || '',
+    failureType: details && details.failureType || '',
+    failureStage: details && details.failureStage || '',
+    failureReason: details && details.failureReason || '',
+    failureDetails: details && details.failureDetails || ''
+  }).catch(function(e) {
+    console.log('Unable to notify game launch failure', e);
+  });
+}
+function clearLaunchTracking() {
+  currentLaunchContext = null;
+  launchStarted = false;
+  launchFailureReported = false;
+  if (launchFailureTimer) {
+    clearTimeout(launchFailureTimer);
+    launchFailureTimer = null;
+  }
+}
+function reportLaunchFailure(failureType, failureReason, failureDetails) {
+  if (!currentLaunchContext || launchStarted || launchFailureReported) {
+    return;
+  }
+  launchFailureReported = true;
+  if (launchFailureTimer) {
+    clearTimeout(launchFailureTimer);
+    launchFailureTimer = null;
+  }
+  notifyGameLaunchFailure(Object.assign({}, currentLaunchContext, {
+    failureType: failureType || 'error',
+    failureStage: 'launch',
+    failureReason: failureReason || '',
+    failureDetails: failureDetails || ''
+  }));
+}
+function beginLaunchTracking(details) {
+  clearLaunchTracking();
+  currentLaunchContext = Object.assign({}, details || {});
+  launchFailureTimer = setTimeout(function() {
+    reportLaunchFailure('timeout', 'Game did not reach onGameStart before the launch timeout.', '');
+  }, 30000);
 }
 function freshJsonUrl(url) {
   var separator = url.indexOf('?') === -1 ? '?' : '&';
@@ -3770,6 +3831,16 @@ function launch(active_item) {
     var gameSaveName = name + rom_extension;
     var bios = 'user/' + path + '/bios/' + readDataAttr(selected, 'bios');
     var gameConsoleTitle = $('#menu').data('config') && $('#menu').data('config').title ? $('#menu').data('config').title : root;
+    beginLaunchTracking({
+      gameName: name,
+      gameFile: gameSaveName,
+      console: root,
+      consoleTitle: gameConsoleTitle,
+      path: path,
+      emulator: emulator,
+      romExtension: rom_extension,
+      gameUrl: encodeURI(rom_path + name + rom_extension)
+    });
     document.documentElement.classList.add('gameplay');
     document.body.classList.add('gameplay');
     // Clear screen
@@ -3858,6 +3929,7 @@ function launch(active_item) {
         text += '\n' + error.stack;
       }
       console.log(text);
+      reportLaunchFailure('window_error', String(message || 'Unknown launch error'), text);
       if (launchErrorDebug) {
         window.EJS_showLaunchError(text);
       }
@@ -3867,6 +3939,7 @@ function launch(active_item) {
       var reason = event && event.reason ? event.reason : 'Unknown promise rejection';
       var text = 'Launch promise rejection: ' + (reason && reason.stack ? reason.stack : reason);
       console.log(text);
+      reportLaunchFailure('promise_rejection', String(reason || 'Unknown promise rejection'), text);
       if (launchErrorDebug) {
         window.EJS_showLaunchError(text);
       }
@@ -3885,6 +3958,12 @@ function launch(active_item) {
       EJS_onGameStart = function() {
         if (typeof previousGameStart === 'function') {
           previousGameStart();
+        }
+        launchStarted = true;
+        launchFailureReported = false;
+        if (launchFailureTimer) {
+          clearTimeout(launchFailureTimer);
+          launchFailureTimer = null;
         }
         resetGameplayViewport();
         restoreLaunchGlobals();
@@ -3930,6 +4009,7 @@ function launch(active_item) {
     loaderscript.src = script;
     loaderscript.onerror = function() {
       restoreLaunchGlobals();
+      reportLaunchFailure('script_load', 'Failed to load startup script.', script);
       if (launchErrorDebug) {
         window.EJS_showLaunchError('Failed to load startup script: ' + script);
       }
@@ -3946,6 +4026,7 @@ function launch(active_item) {
     };
     // Reload window if user clicks back
     $(window).on('hashchange', async function() {
+      clearLaunchTracking();
       if (window.location.hash !== '#game') {
         // Make sure games are saved by sleeping for a second before reloading
         window.exit = true;

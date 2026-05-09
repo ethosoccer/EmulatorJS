@@ -1071,6 +1071,34 @@ app.post('/*', async function(req, res) {
             }
           });
           res.json({status: 'success'});
+        } else if (type == 'notifygamelaunchfailure') {
+          let settings = await readSettings();
+          await emitActivityWebhook(settings, req, {
+            title: 'EmulatorJS game launch failed',
+            event: 'game_launch_failed',
+            action: 'game_launch',
+            status: 'failed',
+            username: profile[hash].username,
+            role: currentRole,
+            source: req.body.source || 'frontend',
+            failure: {
+              type: req.body.failureType || '',
+              stage: req.body.failureStage || 'launch',
+              reason: req.body.failureReason || '',
+              details: req.body.failureDetails || ''
+            },
+            game: {
+              name: req.body.gameName || '',
+              file: req.body.gameFile || '',
+              console: req.body.console || '',
+              consoleTitle: req.body.consoleTitle || '',
+              path: req.body.path || '',
+              emulator: req.body.emulator || '',
+              romExtension: req.body.romExtension || '',
+              url: req.body.gameUrl || ''
+            }
+          });
+          res.json({status: 'success'});
         } else if (type == 'listusers') {
           if (currentRole !== 'admin') {
             res.json(error);

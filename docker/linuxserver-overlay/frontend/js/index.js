@@ -54,6 +54,7 @@ var launchFailureReported = false;
 var launchFailureObserver = null;
 var launchConsoleHooks = null;
 var launchModuleHookTimer = null;
+var launchObservedModule = null;
 var selectorRouteMap = {
   variant: '#selector-game',
   save: '#selector-save'
@@ -293,6 +294,27 @@ function inspectLaunchFailureText(text) {
   }
   return false;
 }
+function hookLaunchModule(moduleValue) {
+  if (!moduleValue || moduleValue.__ejsLaunchFailureHooked) {
+    return moduleValue;
+  }
+  var originalPrint = typeof moduleValue.print === 'function' ? moduleValue.print : null;
+  var originalPrintErr = typeof moduleValue.printErr === 'function' ? moduleValue.printErr : null;
+  moduleValue.__ejsLaunchFailureHooked = true;
+  moduleValue.print = function(text) {
+    inspectLaunchFailureText(text);
+    if (originalPrint) {
+      return originalPrint.apply(this, arguments);
+    }
+  };
+  moduleValue.printErr = function(text) {
+    inspectLaunchFailureText(text);
+    if (originalPrintErr) {
+      return originalPrintErr.apply(this, arguments);
+    }
+  };
+  return moduleValue;
+}
 function reportLaunchFailure(failureType, failureReason, failureDetails, options) {
   options = options || {};
   if (!currentLaunchContext || launchFailureReported) {
@@ -403,26 +425,35 @@ function installLaunchModuleHooks() {
   if (launchModuleHookTimer) {
     clearInterval(launchModuleHookTimer);
   }
-  launchModuleHookTimer = setInterval(function() {
-    var mod = typeof window !== 'undefined' ? window.Module : null;
-    if (!mod || mod.__ejsLaunchFailureHooked) {
-      return;
+  var target = typeof window !== 'undefined' ? window : null;
+  if (!target) {
+    return;
+  }
+  var descriptor = null;
+  try {
+    descriptor = Object.getOwnPropertyDescriptor(target, 'Module');
+    if (!descriptor || descriptor.configurable) {
+      if (descriptor && typeof descriptor.get === 'function') {
+        launchObservedModule = descriptor.get.call(target);
+      } else if ('Module' in target) {
+        launchObservedModule = target.Module;
+      }
+      launchObservedModule = hookLaunchModule(launchObservedModule);
+      Object.defineProperty(target, 'Module', {
+        configurable: true,
+        enumerable: true,
+        get: function() {
+          return launchObservedModule;
+        },
+        set: function(value) {
+          launchObservedModule = hookLaunchModule(value);
+        }
+      });
     }
-    var originalPrint = typeof mod.print === 'function' ? mod.print.bind(mod) : null;
-    var originalPrintErr = typeof mod.printErr === 'function' ? mod.printErr.bind(mod) : null;
-    mod.__ejsLaunchFailureHooked = true;
-    mod.print = function(text) {
-      inspectLaunchFailureText(text);
-      if (originalPrint) {
-        return originalPrint(text);
-      }
-    };
-    mod.printErr = function(text) {
-      inspectLaunchFailureText(text);
-      if (originalPrintErr) {
-        return originalPrintErr(text);
-      }
-    };
+  } catch (e) {}
+  launchModuleHookTimer = setInterval(function() {
+    var mod = target.Module;
+    hookLaunchModule(mod);
   }, 50);
 }
 function beginLaunchTracking(details) {

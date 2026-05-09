@@ -52,6 +52,7 @@ var launchFailureTimer = null;
 var launchStarted = false;
 var launchFailureReported = false;
 var launchFailureObserver = null;
+var launchConsoleHooks = null;
 var selectorRouteMap = {
   variant: '#selector-game',
   save: '#selector-save'
@@ -262,6 +263,14 @@ function clearLaunchTracking() {
     } catch (e) {}
     launchFailureObserver = null;
   }
+  if (launchConsoleHooks) {
+    try {
+      console.log = launchConsoleHooks.log;
+      console.warn = launchConsoleHooks.warn;
+      console.error = launchConsoleHooks.error;
+    } catch (e) {}
+    launchConsoleHooks = null;
+  }
 }
 function reportLaunchFailure(failureType, failureReason, failureDetails, options) {
   options = options || {};
@@ -324,10 +333,60 @@ function installLaunchFailureObserver() {
     launchFailureObserver = null;
   }
 }
+function installLaunchConsoleHooks() {
+  if (launchConsoleHooks) {
+    return;
+  }
+  launchConsoleHooks = {
+    log: console.log,
+    warn: console.warn,
+    error: console.error
+  };
+  function inspectConsoleArgs(argsLike) {
+    if (!currentLaunchContext || launchFailureReported) {
+      return;
+    }
+    var text = Array.prototype.slice.call(argsLike || []).map(function(part) {
+      if (typeof part === 'string') {
+        return part;
+      }
+      if (part && part.stack) {
+        return String(part.stack);
+      }
+      try {
+        return JSON.stringify(part);
+      } catch (e) {
+        return String(part);
+      }
+    }).join(' ');
+    var lowered = text.toLowerCase();
+    if (lowered.indexOf('failed to load content') !== -1) {
+      reportLaunchFailure('retroarch_console', 'Failed to load content', text, {allowAfterStart: true});
+      return;
+    }
+    if (lowered.indexOf('required files are missing') !== -1) {
+      reportLaunchFailure('retroarch_console', 'Required files are missing, the game cannot be run.', text, {allowAfterStart: true});
+      return;
+    }
+  }
+  console.log = function() {
+    inspectConsoleArgs(arguments);
+    return launchConsoleHooks.log.apply(console, arguments);
+  };
+  console.warn = function() {
+    inspectConsoleArgs(arguments);
+    return launchConsoleHooks.warn.apply(console, arguments);
+  };
+  console.error = function() {
+    inspectConsoleArgs(arguments);
+    return launchConsoleHooks.error.apply(console, arguments);
+  };
+}
 function beginLaunchTracking(details) {
   clearLaunchTracking();
   currentLaunchContext = Object.assign({}, details || {});
   installLaunchFailureObserver();
+  installLaunchConsoleHooks();
   launchFailureTimer = setTimeout(function() {
     reportLaunchFailure('timeout', 'Game did not reach onGameStart before the launch timeout.', '');
   }, 30000);

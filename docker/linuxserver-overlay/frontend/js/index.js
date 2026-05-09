@@ -4213,8 +4213,8 @@ function launch(active_item) {
     };
     // Reload window if user clicks back
     $(window).on('hashchange', async function() {
-      clearLaunchTracking();
       if (window.location.hash !== '#game') {
+        clearLaunchTracking();
         // Make sure games are saved by sleeping for a second before reloading
         window.exit = true;
         if (Module) {

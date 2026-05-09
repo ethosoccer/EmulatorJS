@@ -53,6 +53,7 @@ var launchStarted = false;
 var launchFailureReported = false;
 var launchFailureObserver = null;
 var launchConsoleHooks = null;
+var launchModuleHookTimer = null;
 var selectorRouteMap = {
   variant: '#selector-game',
   save: '#selector-save'
@@ -271,6 +272,26 @@ function clearLaunchTracking() {
     } catch (e) {}
     launchConsoleHooks = null;
   }
+  if (launchModuleHookTimer) {
+    clearInterval(launchModuleHookTimer);
+    launchModuleHookTimer = null;
+  }
+}
+function inspectLaunchFailureText(text) {
+  if (!currentLaunchContext || launchFailureReported) {
+    return;
+  }
+  var normalized = String(text || '');
+  var lowered = normalized.toLowerCase();
+  if (lowered.indexOf('failed to load content') !== -1) {
+    reportLaunchFailure('retroarch_console', 'Failed to load content', normalized, {allowAfterStart: true});
+    return true;
+  }
+  if (lowered.indexOf('required files are missing') !== -1) {
+    reportLaunchFailure('retroarch_console', 'Required files are missing, the game cannot be run.', normalized, {allowAfterStart: true});
+    return true;
+  }
+  return false;
 }
 function reportLaunchFailure(failureType, failureReason, failureDetails, options) {
   options = options || {};
@@ -290,6 +311,10 @@ function reportLaunchFailure(failureType, failureReason, failureDetails, options
       launchFailureObserver.disconnect();
     } catch (e) {}
     launchFailureObserver = null;
+  }
+  if (launchModuleHookTimer) {
+    clearInterval(launchModuleHookTimer);
+    launchModuleHookTimer = null;
   }
   notifyGameLaunchFailure(Object.assign({}, currentLaunchContext, {
     failureType: failureType || 'error',
@@ -359,15 +384,7 @@ function installLaunchConsoleHooks() {
         return String(part);
       }
     }).join(' ');
-    var lowered = text.toLowerCase();
-    if (lowered.indexOf('failed to load content') !== -1) {
-      reportLaunchFailure('retroarch_console', 'Failed to load content', text, {allowAfterStart: true});
-      return;
-    }
-    if (lowered.indexOf('required files are missing') !== -1) {
-      reportLaunchFailure('retroarch_console', 'Required files are missing, the game cannot be run.', text, {allowAfterStart: true});
-      return;
-    }
+    inspectLaunchFailureText(text);
   }
   console.log = function() {
     inspectConsoleArgs(arguments);
@@ -382,11 +399,38 @@ function installLaunchConsoleHooks() {
     return launchConsoleHooks.error.apply(console, arguments);
   };
 }
+function installLaunchModuleHooks() {
+  if (launchModuleHookTimer) {
+    clearInterval(launchModuleHookTimer);
+  }
+  launchModuleHookTimer = setInterval(function() {
+    var mod = typeof window !== 'undefined' ? window.Module : null;
+    if (!mod || mod.__ejsLaunchFailureHooked) {
+      return;
+    }
+    var originalPrint = typeof mod.print === 'function' ? mod.print.bind(mod) : null;
+    var originalPrintErr = typeof mod.printErr === 'function' ? mod.printErr.bind(mod) : null;
+    mod.__ejsLaunchFailureHooked = true;
+    mod.print = function(text) {
+      inspectLaunchFailureText(text);
+      if (originalPrint) {
+        return originalPrint(text);
+      }
+    };
+    mod.printErr = function(text) {
+      inspectLaunchFailureText(text);
+      if (originalPrintErr) {
+        return originalPrintErr(text);
+      }
+    };
+  }, 50);
+}
 function beginLaunchTracking(details) {
   clearLaunchTracking();
   currentLaunchContext = Object.assign({}, details || {});
   installLaunchFailureObserver();
   installLaunchConsoleHooks();
+  installLaunchModuleHooks();
   launchFailureTimer = setTimeout(function() {
     reportLaunchFailure('timeout', 'Game did not reach onGameStart before the launch timeout.', '');
   }, 30000);

@@ -51,6 +51,7 @@ var currentLaunchContext = null;
 var launchFailureTimer = null;
 var launchStarted = false;
 var launchFailureReported = false;
+var launchFailureObserver = null;
 var selectorRouteMap = {
   variant: '#selector-game',
   save: '#selector-save'
@@ -255,15 +256,31 @@ function clearLaunchTracking() {
     clearTimeout(launchFailureTimer);
     launchFailureTimer = null;
   }
+  if (launchFailureObserver) {
+    try {
+      launchFailureObserver.disconnect();
+    } catch (e) {}
+    launchFailureObserver = null;
+  }
 }
-function reportLaunchFailure(failureType, failureReason, failureDetails) {
-  if (!currentLaunchContext || launchStarted || launchFailureReported) {
+function reportLaunchFailure(failureType, failureReason, failureDetails, options) {
+  options = options || {};
+  if (!currentLaunchContext || launchFailureReported) {
+    return;
+  }
+  if (launchStarted && options.allowAfterStart !== true) {
     return;
   }
   launchFailureReported = true;
   if (launchFailureTimer) {
     clearTimeout(launchFailureTimer);
     launchFailureTimer = null;
+  }
+  if (launchFailureObserver) {
+    try {
+      launchFailureObserver.disconnect();
+    } catch (e) {}
+    launchFailureObserver = null;
   }
   notifyGameLaunchFailure(Object.assign({}, currentLaunchContext, {
     failureType: failureType || 'error',
@@ -272,9 +289,45 @@ function reportLaunchFailure(failureType, failureReason, failureDetails) {
     failureDetails: failureDetails || ''
   }));
 }
+function installLaunchFailureObserver() {
+  if (typeof MutationObserver !== 'function') {
+    return;
+  }
+  if (launchFailureObserver) {
+    try {
+      launchFailureObserver.disconnect();
+    } catch (e) {}
+  }
+  var interestingMessages = [
+    'Required files are missing, the game cannot be run.',
+    'Failed to load content'
+  ];
+  launchFailureObserver = new MutationObserver(function() {
+    if (!currentLaunchContext || launchFailureReported) {
+      return;
+    }
+    var bodyText = document && document.body ? document.body.innerText || '' : '';
+    for (var i = 0; i < interestingMessages.length; i++) {
+      if (bodyText.indexOf(interestingMessages[i]) !== -1) {
+        reportLaunchFailure('retroarch_runtime', interestingMessages[i], bodyText.slice(0, 4000), {allowAfterStart: true});
+        return;
+      }
+    }
+  });
+  try {
+    launchFailureObserver.observe(document.body, {
+      childList: true,
+      subtree: true,
+      characterData: true
+    });
+  } catch (e) {
+    launchFailureObserver = null;
+  }
+}
 function beginLaunchTracking(details) {
   clearLaunchTracking();
   currentLaunchContext = Object.assign({}, details || {});
+  installLaunchFailureObserver();
   launchFailureTimer = setTimeout(function() {
     reportLaunchFailure('timeout', 'Game did not reach onGameStart before the launch timeout.', '');
   }, 30000);

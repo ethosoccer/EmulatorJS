@@ -1089,51 +1089,52 @@ async function renderRomData(data) {
   previewFrame = $('<iframe>').attr({src: 'frontend/index.html#preview', id: 'preview-iframe'});
   $('#modal-content').append(previewFrame);
   let manage = $('<div>').attr('id', 'rom-manage');
+  let manageDetails = $('<div>').addClass('rom-manage-details');
   let fileLink = $('<a>').attr('href', basePath + dir + '/roms/' + data.file).text(data.file);
   let fileName = $('<p>').text('Rom File: ').append(fileLink);
-  manage.append(fileName);
+  manageDetails.append(fileName);
   if (data.variantInfo) {
     if (data.variantInfo.title && data.variantInfo.title !== data.file) {
-      manage.append($('<p>').text('Parsed Title: ' + data.variantInfo.title));
+      manageDetails.append($('<p>').text('Parsed Title: ' + data.variantInfo.title));
     }
     if (data.variantInfo.region) {
-      manage.append($('<p>').text('Region: ' + data.variantInfo.region));
+      manageDetails.append($('<p>').text('Region: ' + data.variantInfo.region));
     }
     if (data.variantInfo.version) {
-      manage.append($('<p>').text('Version: ' + data.variantInfo.version));
+      manageDetails.append($('<p>').text('Version: ' + data.variantInfo.version));
     }
     if (Array.isArray(data.variantInfo.codeTooltips) && data.variantInfo.codeTooltips.length) {
       let list = $('<ul>').addClass('variant-code-list');
       data.variantInfo.codeTooltips.forEach(function(code) {
         list.append($('<li>').text(code.code + ': ' + code.description));
       });
-      manage.append($('<div>').append($('<p>').text('GoodTools codes:')).append(list));
+      manageDetails.append($('<div>').append($('<p>').text('GoodTools codes:')).append(list));
     }
   }
   if (data.metadata.hasOwnProperty('name')) {
     let name = $('<p>').text('Meta Name: ' + data.metadata.name);
-    manage.append(name);
+    manageDetails.append(name);
   } else {
     let name = $('<p>').text('Meta Name: Unidentified or NA');
-    manage.append(name);
+    manageDetails.append(name);
   }
   if (data.cloneOf) {
     let cloneText = 'Clone of: ' + data.cloneOf;
     if (data.cloneOfName && data.cloneOfName !== data.cloneOf) {
       cloneText += ' (' + data.cloneOfName + ')';
     }
-    manage.append($('<p>').addClass('rom-clone-info').text(cloneText));
+    manageDetails.append($('<p>').addClass('rom-clone-info').text(cloneText));
   }
   let hash = $('<p>').text('Scanned Hash: ' + data.hash);
-  manage.append(hash);
+  manageDetails.append(hash);
   for await (let asset of metaVars) {
     if (data[asset]) {
       let link = $('<a>').attr('href', basePath + data[asset]).text(data[asset]);
       let text = $('<p>').text(asset + ': ').append(link);
-      manage.append(text);
+      manageDetails.append(text);
     } else {
       let text = $('<p>').text(asset + ': Default or not found');
-      manage.append(text);
+      manageDetails.append(text);
     }
   }
   if (data.metadata.hasOwnProperty('video_position')) {
@@ -1146,7 +1147,7 @@ async function renderRomData(data) {
     let posInput = $('<input>').attr({id: 'vidPos', type: 'text', value: vidPos});
     let posButton = $('<button>').addClass('button hover').text('Update').attr('onclick', 'updateVidPos()');
     vidInput.append(posInput,posButton);
-    manage.append(vidInput);
+    manageDetails.append(vidInput);
   }
   let buttonWrapper = $('<div>').attr('id', 'manage-buttons');
   if (data.metadata) {
@@ -1168,6 +1169,7 @@ async function renderRomData(data) {
     let rescanButton = $('<button>').addClass('manage-button clear-scan-flag-button').text('Clear Scan Flag');
     buttonWrapper.append(rescanButton.attr('onclick','clearScanFlag()'));
   }
+  manage.append(manageDetails);
   manage.append(buttonWrapper);
   $('#modal-content').append(manage);
 }

@@ -1988,6 +1988,9 @@ io.on('connection', async function (socket) {
       if ((dir == 'arcade') && (metaData.hasOwnProperty(name)) && (metaData[name].hasOwnProperty('cloneof'))) {
         Object.assign(config.items[name], {'cloneof': metaData[name].cloneof});
       };
+      if ((dir == 'arcade') && (metaData.hasOwnProperty(name)) && metaData[name].name && metaData[name].name !== name) {
+        Object.assign(config.items[name], {'selector_display_name': metaData[name].name});
+      };
       if (multi_disc !== config.defaults.multi_disc) {
         Object.assign(config.items[name], {'multi_disc': multi_disc});
       };

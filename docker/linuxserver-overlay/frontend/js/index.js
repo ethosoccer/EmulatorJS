@@ -3530,7 +3530,8 @@ function variantPreferenceScore(variant) {
   }
   return score;
 }
-function groupConsoleItems(consoleConfig, consoleRoot) {
+function groupConsoleItems(consoleConfig, consoleRoot, options) {
+  options = options || {};
   var defaults = consoleConfig.defaults || {};
   var groups = {};
   var entries = [];
@@ -3538,23 +3539,29 @@ function groupConsoleItems(consoleConfig, consoleRoot) {
   var allowGrouping = consoleConfig.selectorMode !== true && consoleRoot !== 'main' && !(consoleConfig.hasOwnProperty('multi_name') && hasUsableValue(consoleConfig.multi_name));
   Object.keys(consoleConfig.items).forEach(function(name) {
     var item = consoleConfig.items[name];
-    if ((item.hasOwnProperty('cloneof')) && (consoleConfig.items.hasOwnProperty(item.cloneof))) {
+    var hiddenClone = (item.hasOwnProperty('cloneof')) && (consoleConfig.items.hasOwnProperty(item.cloneof));
+    if (hiddenClone && !options.includeHiddenClones) {
       return;
     }
     var resolved = resolveItem(item, defaults);
     var itemType = resolved.type;
     var parsed = parseVariantInfo(name);
+    var extension = resolved.rom_extension || '';
+    var romFileName = name + extension;
+    var displayName = item.selector_display_name || resolved.selector_display_name || parsed.title;
     var variant = {
       id: resolved.path + '::' + name,
       name: name,
-      displayName: parsed.title,
+      displayName: displayName,
       title: consoleConfig.title || consoleRoot,
       root: consoleRoot,
       path: resolved.path,
       index: index,
       resolved: resolved,
       multiDisc: Number(resolved.multi_disc || 0),
-      extension: resolved.rom_extension || '',
+      extension: extension,
+      romFileName: romFileName,
+      hiddenClone: hiddenClone,
       hasLogo: resolved.has_logo === true || resolved.has_logo === 'true',
       hasVideo: resolved.has_video === true || resolved.has_video === 'true',
       groupKey: parsed.groupKey,
@@ -3564,14 +3571,14 @@ function groupConsoleItems(consoleConfig, consoleRoot) {
       flags: parsed.flags,
       clean: parsed.clean,
       codeTooltips: parsed.codeTooltips,
-      searchText: parsed.searchText
+      searchText: [parsed.searchText, displayName, romFileName].join(' ').toLowerCase()
     };
-      if (!allowGrouping || itemType !== 'game') {
+      if (!allowGrouping || itemType !== 'game' || hiddenClone) {
         entries.push({
           id: variant.id,
           key: 'single:' + name,
           name: name,
-          displayName: item.selector_display_name || resolved.selector_display_name || name,
+          displayName: displayName,
           root: consoleRoot,
           title: consoleConfig.title || consoleRoot,
           originalIndex: index,
@@ -3656,7 +3663,7 @@ async function buildSearchCatalog() {
       var consoleConfig = await fetchConfig(consoleRoot);
       var consoleTitle = consoleConfig.title || consoleRoot;
       consoles.push({root: consoleRoot, title: consoleTitle});
-      for await (var entry of groupConsoleItems(consoleConfig, consoleRoot)) {
+      for await (var entry of groupConsoleItems(consoleConfig, consoleRoot, {includeHiddenClones: true})) {
         if (entry.itemType !== 'game') {
           continue;
         }
@@ -3668,6 +3675,9 @@ async function buildSearchCatalog() {
           title: consoleTitle,
           index: entry.originalIndex,
           path: resolved.path,
+          exactName: entry.representative.name,
+          romFileName: entry.representative.romFileName || (entry.representative.name + (resolved.rom_extension || '')),
+          hiddenClone: entry.representative.hiddenClone === true,
           hasLogo: resolved.has_logo === true || resolved.has_logo === 'true',
           hasVideo: resolved.has_video === true || resolved.has_video === 'true',
           multiDisc: Number(resolved.multi_disc || 0),
@@ -3740,9 +3750,12 @@ function renderSearchResults(results, query, favoritesOnly) {
   }
   for (var item of results) {
     var favorite = isFavorite(item.id);
-    var result = $('<button>').addClass('search-result').attr('type', 'button').attr('onclick', 'openSearchResult("' + item.root + '",' + item.index + ')');
+    var result = $('<button>').addClass('search-result').attr('type', 'button').attr('onclick', 'openSearchResult("' + item.root + '",' + item.index + ',' + JSON.stringify(item.exactName || '') + ')');
     result.append($('<span>').addClass('search-result-title').html((favorite ? '&hearts; ' : '') + escapeHtml(item.name)));
     var meta = item.title;
+    if (item.romFileName && item.romFileName !== item.name) {
+      meta += ' - ' + item.romFileName;
+    }
     if (!item.hasLogo) {
       meta += ' - missing logo';
     }
@@ -3759,8 +3772,26 @@ function renderSearchResults(results, query, favoritesOnly) {
     $('#search-results').append(result);
   }
 }
-function openSearchResult(root, index) {
+async function openSearchResult(root, index, exactName) {
   closeSearchPanel();
+  if (exactName) {
+    var config = await fetchConfig(root);
+    if (config && config.items && config.items[exactName] && config.items[exactName].cloneof && config.items[config.items[exactName].cloneof]) {
+      $('#menu').data('config', config);
+      $('#menu').data('root', root);
+      var resolved = resolveItem(config.items[exactName], config.defaults || {});
+      var temp = $('<button>');
+      temp.attr('data-name', exactName);
+      temp.attr('data-display-name', config.items[exactName].selector_display_name || exactName);
+      temp.attr('data-group-display-name', config.items[exactName].selector_display_name || exactName);
+      temp.attr('data-original-index', Number(index || 0));
+      for (var key of defaultKeys) {
+        temp.attr('data-' + key, String(resolved[key] || ''));
+      }
+      launch(temp);
+      return;
+    }
+  }
   var target = '#' + root + '---' + index;
   if (window.location.hash === target) {
     loadjson(root, index);

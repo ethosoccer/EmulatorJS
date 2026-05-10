@@ -2371,6 +2371,12 @@ io.on('connection', async function (socket) {
         romData.metadata.video_position = defaultVidPos;
         config.items[name].video_position = defaultVidPos;
       }
+      if (metaData[hash].hasOwnProperty('cloneof')) {
+        romData.cloneOf = metaData[hash].cloneof;
+        if (metaData[romData.cloneOf] && metaData[romData.cloneOf].name) {
+          romData.cloneOfName = metaData[romData.cloneOf].name;
+        }
+      }
     } else {
       romData.metadata = false;
     }

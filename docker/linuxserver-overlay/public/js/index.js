@@ -1117,6 +1117,13 @@ async function renderRomData(data) {
     let name = $('<p>').text('Meta Name: Unidentified or NA');
     manage.append(name);
   }
+  if (data.cloneOf) {
+    let cloneText = 'Clone of: ' + data.cloneOf;
+    if (data.cloneOfName && data.cloneOfName !== data.cloneOf) {
+      cloneText += ' (' + data.cloneOfName + ')';
+    }
+    manage.append($('<p>').addClass('rom-clone-info').text(cloneText));
+  }
   let hash = $('<p>').text('Scanned Hash: ' + data.hash);
   manage.append(hash);
   for await (let asset of metaVars) {

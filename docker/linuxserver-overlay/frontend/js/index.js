@@ -3408,11 +3408,28 @@ function renderFavoritesPanel() {
     $('#favorites-status').text('Loading favorites...');
     return;
   }
+  function findFavoriteCatalogMatch(favorite) {
+    if (!favorite) {
+      return null;
+    }
+    var exactName = String(favorite.exactName || '').toLowerCase();
+    var root = String(favorite.root || '').toLowerCase();
+    var id = String(favorite.id || '');
+    var favoriteBasename = saveBasename(favorite.romFileName || favorite.exactName || favorite.name || '').toLowerCase();
+    return searchCatalog.items.find(function(item) {
+      return item.id === id;
+    }) || searchCatalog.items.find(function(item) {
+      return root && exactName && String(item.root || '').toLowerCase() === root && String(item.exactName || '').toLowerCase() === exactName;
+    }) || searchCatalog.items.find(function(item) {
+      if (!root || !favoriteBasename || String(item.root || '').toLowerCase() !== root) {
+        return false;
+      }
+      return saveBasename(item.romFileName || item.exactName || item.name || '').toLowerCase() === favoriteBasename;
+    }) || null;
+  }
   var favorites = getFavorites();
   var favoriteItems = favorites.map(function(favorite) {
-    var catalogMatch = searchCatalog.items.find(function(item) {
-      return item.id === favorite.id;
-    });
+    var catalogMatch = findFavoriteCatalogMatch(favorite);
     return catalogMatch || favorite;
   }).filter(function(favorite) {
     return favorite && favorite.id;
@@ -3792,6 +3809,8 @@ function groupConsoleItems(consoleConfig, consoleRoot, options) {
     entry.variantCount = entry.variants.length;
     entry.id = entry.representative.id;
     entry.itemType = entry.representative.resolved.type;
+    entry.name = entry.representative.displayName || entry.representative.name || entry.name;
+    entry.displayName = entry.representative.displayName || entry.displayName || entry.name;
     entry.searchText = entry.searchTextParts ? entry.searchTextParts.join(' ') : entry.representative.searchText;
   });
   return entries;

@@ -1423,7 +1423,7 @@ function renderLogsPage(payload) {
     .append($('<option>').attr('value', 'success').text('Success'))
     .append($('<option>').attr('value', 'failed').text('Failed'))
     .append($('<option>').attr('value', 'blocked').text('Blocked')).val(logFilters.status || 'all')));
-  filterGrid.append($('<label>').text('Username').append($('<input>').attr({id: 'logUsername', type: 'text', placeholder: 'eugene'}).val(logFilters.username || '')));
+  filterGrid.append($('<label>').text('Username').append($('<input>').attr({id: 'logUsername', type: 'text', placeholder: 'username'}).val(logFilters.username || '')));
   filterGrid.append($('<label>').text('Search').append($('<input>').attr({id: 'logSearch', type: 'text', placeholder: 'game, IP, console...'}).val(logFilters.search || '')));
   filterCard.append(filterGrid);
   filterCard.append($('<div>').addClass('logs-button-row')

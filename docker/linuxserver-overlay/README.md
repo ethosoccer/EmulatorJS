@@ -60,7 +60,7 @@ The overlay replaces the LinuxServer helper app's file browser assets:
 
 The file browser now shares the modern admin styling and dark-mode toggle. Its existing profile Pull/Push buttons also include favorites in the profile zip.
 
-The file browser is treated as an admin surface. Profile logins now include a `role` of `admin` or `user`; existing `eugene` profiles are treated as `admin` if no role is stored yet, while other missing roles default to `user`. Non-admin users do not see the file-browser icon on the main screen, and `/filebrowser.html` shows an admin login gate instead of the file browser.
+The file browser is treated as an admin surface. Profile logins now include a `role` of `admin` or `user`; if no admin role exists yet, the first existing profile is promoted to `admin` so older installs remain accessible. Set `EMULATORJS_ADMIN_FALLBACK_USER` to choose a specific bootstrap admin profile during migration. Non-admin users do not see the file-browser icon on the main screen, and `/filebrowser.html` shows an admin login gate instead of the file browser.
 
 File deletion now requires a confirmation dialog. The file browser also includes User Management for admins, including role changes, simple user creation, and an option to require login before showing the main game browser.
 
@@ -75,7 +75,7 @@ The frontend and admin HTML also use versioned CSS/JS URLs so new overlay builds
 From the repository root:
 
 ```sh
-docker build -t ethosoccer/emulatorjs:ipfs-retry-fix docker/linuxserver-overlay
+docker build -t your-registry/emulatorjs:custom docker/linuxserver-overlay
 ```
 
 Use the resulting image in place of `lscr.io/linuxserver/emulatorjs:latest` in the server compose file.

@@ -539,8 +539,9 @@ async function readProfiles() {
     return profiles[userHash] && profiles[userHash].role === 'admin';
   });
   if (!hasAdmin) {
+    let fallbackAdminUser = String(process.env.EMULATORJS_ADMIN_FALLBACK_USER || '').trim();
     let fallbackHash = Object.keys(profiles).find(function(userHash) {
-      return profiles[userHash] && profiles[userHash].username === 'eugene';
+      return fallbackAdminUser && profiles[userHash] && profiles[userHash].username === fallbackAdminUser;
     }) || Object.keys(profiles)[0];
     if (fallbackHash && profiles[fallbackHash]) {
       profiles[fallbackHash].role = 'admin';

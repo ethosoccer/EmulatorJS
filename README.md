@@ -34,6 +34,8 @@ This fork is tailored for a self-hosted EmulatorJS deployment with a browser-fac
 - Save-state and ROM download actions directly from the game browser
 - Default fallback video support from `data/main/videos/default.mp4` when a game-specific preview video is missing
 - Profile popup with game save browsing, save version history, and version-aware downloads
+- Profile popup preferences for per-user `Popup selectors` and `Launch debug` overrides
+- Touch-friendly profile help/info buttons so preference descriptions are readable on mobile without hover
 - Automatic push-to-server when local save data changes while a user is logged in
 
 ### Profiles and sync
@@ -42,11 +44,14 @@ This fork is tailored for a self-hosted EmulatorJS deployment with a browser-fac
 - Sync history preservation so pushes do not delete prior saves/configs; older versions are retained in history instead of being silently removed
 - Password reset request webhook support
 - Password change flows for admins and non-admin users
+- Per-user frontend preference overrides stored with the profile and resolved against global defaults
 
 ### Admin and file browser
 - Modernized admin/file browser styling with light/dark mode support
 - Resizable responsive modal windows across the admin UI
 - User management, role management, and optional login gate for the main frontend
+- Global frontend defaults for `Require login`, `Popup selectors`, and `Launch debug`
+- Per-user override controls for `Popup selectors` and `Launch debug` in `/filebrowser.html`
 - Protected admin and file browser surfaces with admin-only access
 - Safer destructive actions, including confirmations for ROM/file deletion paths
 
@@ -70,6 +75,12 @@ This fork is tailored for a self-hosted EmulatorJS deployment with a browser-fac
 
 ### Deployment notes
 This fork includes a Docker-based deployment overlay in [`docker/linuxserver-overlay`](docker/linuxserver-overlay) for the self-hosted setup used in this project.
+
+For this fork, frontend cache busting is manual:
+
+- update the `?v=...` asset tokens in `docker/linuxserver-overlay/frontend/index.html` whenever frontend JS or CSS changes
+- redeploy the LinuxServer overlay image after pushing
+- verify the running container is serving the new token if the browser appears stale
 
 ### GoodTools naming support
 This fork understands common [GoodTools](https://segaretro.org/GoodTools) naming conventions and uses them throughout ROM scanning, art downloads, and the frontend variant picker. The code meanings are based on GoodTools references from Sega Retro and Game Tech Wiki's [standard code list](https://emulation.gametechwiki.com/index.php/GoodTools#Standard_codes).

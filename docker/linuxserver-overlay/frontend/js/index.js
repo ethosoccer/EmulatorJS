@@ -2342,6 +2342,11 @@ function variantCodeSummary(variant) {
 }
 function variantSummary(variant) {
   var bits = [];
+  if (variant.cloneGroupParent === true) {
+    bits.push('Parent set');
+  } else if (variant.hiddenClone && variant.cloneParentName) {
+    bits.push('Clone of ' + variant.cloneParentName);
+  }
   if (variant.regionLabel) {
     bits.push(repairDisplayText(variant.regionLabel));
   }
@@ -2350,6 +2355,9 @@ function variantSummary(variant) {
   }
   if (variant.extraLabel) {
     bits.push(repairDisplayText(variant.extraLabel));
+  }
+  if ((variant.cloneGroupParent || variant.hiddenClone) && variant.romFileName) {
+    bits.push(variant.romFileName);
   }
   return bits.join(' | ') || 'Default release';
 }
@@ -2425,7 +2433,7 @@ function renderVariantPanel() {
     for (var key of defaultKeys) {
       button.attr('data-' + key, String(variant.resolved[key] || ''));
     }
-    button.append($('<span>').addClass('variant-launch-title').text(safeDecodeDisplayName(variant.name)));
+    button.append($('<span>').addClass('variant-launch-title').text(safeDecodeDisplayName(variant.displayName || variant.name)));
     button.append($('<span>').addClass('variant-launch-meta').text(variantSummary(variant)));
     var codeSummary = variantCodeSummary(variant);
     if (codeSummary) {
@@ -2475,6 +2483,11 @@ function renderVariantPanel() {
 }
 function variantSelectorSubtitle(variant) {
   var parts = [];
+  if (variant.cloneGroupParent === true) {
+    parts.push('Parent set');
+  } else if (variant.hiddenClone && variant.cloneParentName) {
+    parts.push('Clone of ' + variant.cloneParentName);
+  }
   if (variant.regionLabel) {
     parts.push(variant.regionLabel);
   }
@@ -2483,6 +2496,9 @@ function variantSelectorSubtitle(variant) {
   }
   if (variant.extraLabel) {
     parts.push(variant.extraLabel);
+  }
+  if ((variant.cloneGroupParent || variant.hiddenClone) && variant.romFileName) {
+    parts.push(variant.romFileName);
   }
   return parts.join(' | ');
 }
@@ -3701,6 +3717,12 @@ function versionPriority(label) {
 }
 function variantPreferenceScore(variant) {
   var score = 0;
+  if (variant.cloneGroupParent === true) {
+    score += 1000;
+  }
+  if (variant.hiddenClone) {
+    score -= 100;
+  }
   if (variant.resolved.has_logo === true || variant.resolved.has_logo === 'true') {
     score += 30;
   }
@@ -3722,20 +3744,35 @@ function groupConsoleItems(consoleConfig, consoleRoot, options) {
   var defaults = consoleConfig.defaults || {};
   var groups = {};
   var entries = [];
+  var pendingCloneVariants = {};
   var index = 0;
   var allowGrouping = consoleConfig.selectorMode !== true && consoleRoot !== 'main' && !(consoleConfig.hasOwnProperty('multi_name') && hasUsableValue(consoleConfig.multi_name));
+  var cloneParents = {};
+  Object.keys(consoleConfig.items).forEach(function(name) {
+    var item = consoleConfig.items[name];
+    if (item && item.hasOwnProperty('cloneof') && consoleConfig.items.hasOwnProperty(item.cloneof)) {
+      cloneParents[item.cloneof] = true;
+    }
+  });
+  function displayNameForConfigItem(name) {
+    var item = consoleConfig.items[name] || {};
+    var resolved = resolveItem(item, defaults);
+    return item.selector_display_name || resolved.selector_display_name || parseVariantInfo(name).title || name;
+  }
   Object.keys(consoleConfig.items).forEach(function(name) {
     var item = consoleConfig.items[name];
     var hiddenClone = (item.hasOwnProperty('cloneof')) && (consoleConfig.items.hasOwnProperty(item.cloneof));
-    if (hiddenClone && !options.includeHiddenClones) {
-      return;
-    }
     var resolved = resolveItem(item, defaults);
     var itemType = resolved.type;
     var parsed = parseVariantInfo(name);
     var extension = resolved.rom_extension || '';
     var romFileName = name + extension;
     var displayName = item.selector_display_name || resolved.selector_display_name || parsed.title;
+    var cloneParentName = hiddenClone ? item.cloneof : '';
+    var cloneGroupParent = !hiddenClone && cloneParents[name] === true;
+    var cloneGroupKey = cloneParentName || (cloneGroupParent ? name : '');
+    var groupKey = cloneGroupKey ? 'clone:' + cloneGroupKey : parsed.groupKey;
+    var groupDisplayName = cloneGroupKey ? displayNameForConfigItem(cloneGroupKey) : parsed.title;
     var variant = {
       id: resolved.path + '::' + name,
       name: name,
@@ -3749,9 +3786,11 @@ function groupConsoleItems(consoleConfig, consoleRoot, options) {
       extension: extension,
       romFileName: romFileName,
       hiddenClone: hiddenClone,
+      cloneParentName: cloneParentName,
+      cloneGroupParent: cloneGroupParent,
       hasLogo: resolved.has_logo === true || resolved.has_logo === 'true',
       hasVideo: resolved.has_video === true || resolved.has_video === 'true',
-      groupKey: parsed.groupKey,
+      groupKey: groupKey,
       regionLabel: parsed.regionLabel,
       versionLabel: parsed.versionLabel,
       extraLabel: parsed.extraLabel,
@@ -3760,7 +3799,10 @@ function groupConsoleItems(consoleConfig, consoleRoot, options) {
       codeTooltips: parsed.codeTooltips,
       searchText: [parsed.searchText, displayName, romFileName].join(' ').toLowerCase()
     };
-      if (!allowGrouping || itemType !== 'game' || hiddenClone) {
+      if (!allowGrouping || itemType !== 'game') {
+        if (hiddenClone && !options.includeHiddenClones) {
+          return;
+        }
         entries.push({
           id: variant.id,
           key: 'single:' + name,
@@ -3780,22 +3822,39 @@ function groupConsoleItems(consoleConfig, consoleRoot, options) {
       index++;
       return;
     }
-    if (!groups[variant.groupKey]) {
-      groups[variant.groupKey] = {
+    if (hiddenClone && !groups[groupKey]) {
+      if (!pendingCloneVariants[groupKey]) {
+        pendingCloneVariants[groupKey] = [];
+      }
+      pendingCloneVariants[groupKey].push(variant);
+      return;
+    }
+    if (!groups[groupKey]) {
+      groups[groupKey] = {
         id: variant.id,
-        key: variant.groupKey,
-        name: parsed.title,
-        displayName: parsed.title,
+        key: groupKey,
+        groupKey: groupKey,
+        name: groupDisplayName,
+        displayName: groupDisplayName,
         root: consoleRoot,
         title: consoleConfig.title || consoleRoot,
         variants: [],
         searchTextParts: []
       };
-      entries.push(groups[variant.groupKey]);
+      entries.push(groups[groupKey]);
+      if (pendingCloneVariants[groupKey]) {
+        pendingCloneVariants[groupKey].forEach(function(cloneVariant) {
+          groups[groupKey].variants.push(cloneVariant);
+          groups[groupKey].searchTextParts.push(cloneVariant.searchText);
+        });
+        delete pendingCloneVariants[groupKey];
+      }
     }
-    groups[variant.groupKey].variants.push(variant);
-    groups[variant.groupKey].searchTextParts.push(variant.searchText);
-    index++;
+    groups[groupKey].variants.push(variant);
+    groups[groupKey].searchTextParts.push(variant.searchText);
+    if (!hiddenClone) {
+      index++;
+    }
   });
   entries.forEach(function(entry) {
     if (!entry.variants || entry.variants.length === 0) {

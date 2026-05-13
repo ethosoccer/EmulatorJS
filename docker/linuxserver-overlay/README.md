@@ -46,7 +46,7 @@ Favorites are stored in browser `localStorage` using the console path and game n
 
 The frontend also has a Profile login popup that uses the same `/profile` endpoint as the file browser. Logging in pulls the server profile, and logged-in users can manually pull or push from that popup.
 
-Favorites are included in profile sync as `.emulatorjs-favorites.json` inside the pushed profile zip. Pull restores that file into browser `localStorage`, while save/state files continue to use the existing `RetroArch` IndexedDB profile storage.
+Favorites are included in profile sync as `.emulatorjs-favorites.json` inside the pushed profile zip. Pull restores that file into browser `localStorage`, while save/state files continue to use the existing `RetroArch` IndexedDB profile storage. A companion `.emulatorjs-favorites-sync.json` file tracks favorite add/remove timestamps so stale browser pushes merge with the server instead of overwriting newer favorites.
 
 Profile push is best-effort automatic while logged in: changing favorites queues a push, and the frontend also pushes every five minutes while the page is active. Browser games do not expose one reliable cross-core "save happened" event, so the periodic sync covers normal in-game saves and quicksaves without trying to hook every emulator core separately.
 

@@ -15,6 +15,8 @@ var net = require('net');
 // Default vars
 var error = {status: 'error'};
 var settingsFile = home + '/profile/settings.json';
+var favoritesProfileFile = '.emulatorjs-favorites.json';
+var favoritesSyncProfileFile = '.emulatorjs-favorites-sync.json';
 var authAttempts = new Map();
 var forgotPasswordAttempts = new Map();
 var RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
@@ -731,6 +733,112 @@ function normalizeSaveRelativePath(relativePath) {
   return String(relativePath || '').replace(/\\/g, '/').replace(/^\/+/, '');
 }
 
+function normalizeFavoritesList(favorites) {
+  return Array.isArray(favorites) ? favorites.map(function(favorite) {
+    return typeof favorite === 'string' ? {id: favorite} : favorite;
+  }).filter(function(favorite) {
+    return favorite && favorite.id && favorite.id !== 'undefined' && favorite.id.indexOf('undefined::') !== 0;
+  }) : [];
+}
+
+function favoriteSyncTimestamp(record) {
+  return Math.max(Number(record && record.updatedAt || 0), Number(record && record.addedAt || 0), Number(record && record.removedAt || 0));
+}
+
+function mergeFavoritesState(baseFavoritesData, baseSyncData, incomingFavoritesData, incomingSyncData) {
+  let state = {version: 1, records: {}};
+  function parseFavorites(data) {
+    if (!data) {
+      return [];
+    }
+    try {
+      return normalizeFavoritesList(JSON.parse(Buffer.isBuffer(data) ? data.toString('utf8') : String(data)));
+    } catch (e) {
+      console.log('Unable to parse favorites data', e);
+      return [];
+    }
+  }
+  function parseSync(data) {
+    if (!data) {
+      return null;
+    }
+    try {
+      let parsed = JSON.parse(Buffer.isBuffer(data) ? data.toString('utf8') : String(data));
+      return parsed && parsed.records && typeof parsed.records === 'object' ? parsed : null;
+    } catch (e) {
+      console.log('Unable to parse favorites sync data', e);
+      return null;
+    }
+  }
+  function seedFavorites(favorites) {
+    favorites.forEach(function(favorite) {
+      if (!state.records[favorite.id]) {
+        state.records[favorite.id] = {
+          id: favorite.id,
+          favorite: favorite,
+          addedAt: 1,
+          removedAt: null,
+          updatedAt: 1
+        };
+      }
+    });
+  }
+  function mergeSync(sync) {
+    if (!sync) {
+      return;
+    }
+    Object.keys(sync.records || {}).forEach(function(id) {
+      let record = sync.records[id];
+      if (!record || !id) {
+        return;
+      }
+      let existing = state.records[id];
+      if (!existing || favoriteSyncTimestamp(record) >= favoriteSyncTimestamp(existing)) {
+        state.records[id] = {
+          id: id,
+          favorite: record.favorite || existing && existing.favorite || {id: id},
+          addedAt: Number(record.addedAt || 0),
+          removedAt: record.removedAt || null,
+          updatedAt: favoriteSyncTimestamp(record)
+        };
+      }
+    });
+  }
+  seedFavorites(parseFavorites(baseFavoritesData));
+  mergeSync(parseSync(baseSyncData));
+  seedFavorites(parseFavorites(incomingFavoritesData));
+  mergeSync(parseSync(incomingSyncData));
+  return state;
+}
+
+function activeFavoritesFromSyncState(state) {
+  return Object.keys(state.records || {}).map(function(id) {
+    return state.records[id];
+  }).filter(function(record) {
+    return record && (!record.removedAt || Number(record.addedAt || 0) > Number(record.removedAt || 0));
+  }).sort(function(a, b) {
+    return Number(a.addedAt || 0) - Number(b.addedAt || 0);
+  }).map(function(record) {
+    return record.favorite || {id: record.id};
+  });
+}
+
+async function mergeAndWriteFavorites(profilePath, zip, incomingFavoritesContent) {
+  let favoritesPath = safeProfilePath(profilePath, favoritesProfileFile);
+  let syncPath = safeProfilePath(profilePath, favoritesSyncProfileFile);
+  let existingFavorites = fs.existsSync(favoritesPath) ? await fsw.readFile(favoritesPath) : null;
+  let existingSync = fs.existsSync(syncPath) ? await fsw.readFile(syncPath) : null;
+  let incomingSync = zip.files[favoritesSyncProfileFile] ? Buffer.from(await zip.files[favoritesSyncProfileFile].async('arraybuffer')) : null;
+  let merged = mergeFavoritesState(existingFavorites, existingSync, incomingFavoritesContent, incomingSync);
+  await ensureDir(favoritesPath);
+  await fsw.writeFile(favoritesPath, JSON.stringify(activeFavoritesFromSyncState(merged), null, 2));
+  await fsw.writeFile(syncPath, JSON.stringify({
+    version: 1,
+    updatedAt: Date.now(),
+    records: merged.records || {}
+  }, null, 2));
+}
+
 function saveVersionStorageKey(relativePath) {
   return Buffer.from(normalizeSaveRelativePath(relativePath), 'utf8').toString('hex');
 }
@@ -1404,8 +1512,15 @@ app.post('/*', async function(req, res) {
               continue;
             }
             let normalizedFileName = normalizeSaveRelativePath(fileName);
+            if (normalizedFileName === favoritesSyncProfileFile) {
+              continue;
+            }
             let targetPath = safeProfilePath(profilePath, normalizedFileName);
             let content = Buffer.from(await zipEntry.async('arraybuffer'));
+            if (normalizedFileName === favoritesProfileFile) {
+              await mergeAndWriteFavorites(profilePath, zip, content);
+              continue;
+            }
             await ensureDir(targetPath);
             let changed = true;
             if (fs.existsSync(targetPath)) {

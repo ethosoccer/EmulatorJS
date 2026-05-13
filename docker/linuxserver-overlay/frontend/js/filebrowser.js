@@ -7,6 +7,8 @@ var fs = require('fs');
 var mfs = new BrowserFS.FileSystem.MountableFileSystem();
 var postSettings = {method:'POST',headers:{Accept:'application/json','Content-Type':'application/json'}};
 var favoritesProfileFile = '.emulatorjs-favorites.json';
+var favoritesSyncProfileFile = '.emulatorjs-favorites-sync.json';
+var favoritesSyncStorageKey = 'ejsFavoritesSync';
 var userOverrideHelp = {
   selectorStyle: 'Use popup game/save selectors instead of the controller-friendly full menu selector',
   launchErrorDebug: 'Show in-game launch error overlay for debugging'
@@ -42,16 +44,132 @@ function getFavoritesForProfile() {
   return localStorage.getItem('ejsFavorites') || '[]';
 }
 
-function restoreFavoritesFromProfile(data) {
-  if (typeof data === 'undefined' || data === null) {
-    return;
-  }
+function getFavoritesSyncForProfile() {
+  return localStorage.getItem(favoritesSyncStorageKey) || JSON.stringify(readFavoritesSyncState());
+}
+
+function normalizeFavoritesList(favorites) {
+  return Array.isArray(favorites) ? favorites.map(function(favorite) {
+    return typeof favorite === 'string' ? {id: favorite} : favorite;
+  }).filter(function(favorite) {
+    return favorite && favorite.id && favorite.id !== 'undefined' && favorite.id.indexOf('undefined::') !== 0;
+  }) : [];
+}
+
+function readFavoritesSyncState() {
   try {
-    JSON.parse(data);
-    localStorage.setItem('ejsFavorites', data);
+    var parsed = JSON.parse(localStorage.getItem(favoritesSyncStorageKey) || '{}');
+    if (parsed && parsed.records && typeof parsed.records === 'object') {
+      return parsed;
+    }
   } catch(e) {
     console.log(e);
   }
+  return {version: 1, records: {}};
+}
+
+function writeFavoritesSyncState(state) {
+  localStorage.setItem(favoritesSyncStorageKey, JSON.stringify({
+    version: 1,
+    updatedAt: Date.now(),
+    records: state && state.records || {}
+  }));
+}
+
+function favoriteSyncTimestamp(record) {
+  return Math.max(Number(record && record.updatedAt || 0), Number(record && record.addedAt || 0), Number(record && record.removedAt || 0));
+}
+
+function mergeFavoritesState(baseFavorites, baseSyncData, incomingFavorites, incomingSyncData) {
+  var state = {version: 1, records: {}};
+  function parseFavorites(data) {
+    if (typeof data === 'undefined' || data === null || data === '') {
+      return [];
+    }
+    try {
+      return normalizeFavoritesList(JSON.parse(data));
+    } catch(e) {
+      console.log(e);
+      return [];
+    }
+  }
+  function parseSync(data) {
+    if (typeof data === 'undefined' || data === null || data === '') {
+      return null;
+    }
+    try {
+      var parsed = typeof data === 'string' ? JSON.parse(data) : data;
+      return parsed && parsed.records && typeof parsed.records === 'object' ? parsed : null;
+    } catch(e) {
+      console.log(e);
+      return null;
+    }
+  }
+  function seedFavorites(favorites) {
+    favorites.forEach(function(favorite) {
+      if (!state.records[favorite.id]) {
+        state.records[favorite.id] = {
+          id: favorite.id,
+          favorite: favorite,
+          addedAt: 1,
+          removedAt: null,
+          updatedAt: 1
+        };
+      }
+    });
+  }
+  function mergeSync(sync) {
+    if (!sync) {
+      return;
+    }
+    Object.keys(sync.records || {}).forEach(function(id) {
+      var record = sync.records[id];
+      if (!record || !id) {
+        return;
+      }
+      var existing = state.records[id];
+      if (!existing || favoriteSyncTimestamp(record) >= favoriteSyncTimestamp(existing)) {
+        state.records[id] = {
+          id: id,
+          favorite: record.favorite || existing && existing.favorite || {id: id},
+          addedAt: Number(record.addedAt || 0),
+          removedAt: record.removedAt || null,
+          updatedAt: favoriteSyncTimestamp(record)
+        };
+      }
+    });
+  }
+  seedFavorites(parseFavorites(baseFavorites));
+  mergeSync(parseSync(baseSyncData));
+  seedFavorites(parseFavorites(incomingFavorites));
+  mergeSync(parseSync(incomingSyncData));
+  return state;
+}
+
+function activeFavoritesFromSyncState(state) {
+  return Object.keys(state.records || {}).map(function(id) {
+    return state.records[id];
+  }).filter(function(record) {
+    return record && (!record.removedAt || Number(record.addedAt || 0) > Number(record.removedAt || 0));
+  }).sort(function(a, b) {
+    return Number(a.addedAt || 0) - Number(b.addedAt || 0);
+  }).map(function(record) {
+    return record.favorite || {id: record.id};
+  });
+}
+
+function restoreFavoritesFromProfile(data, syncData) {
+  if (typeof data === 'undefined' || data === null) {
+    data = '[]';
+  }
+  var merged = mergeFavoritesState(
+    localStorage.getItem('ejsFavorites') || '[]',
+    localStorage.getItem(favoritesSyncStorageKey) || '',
+    data,
+    syncData
+  );
+  localStorage.setItem('ejsFavorites', JSON.stringify(normalizeFavoritesList(activeFavoritesFromSyncState(merged))));
+  writeFavoritesSyncState(merged);
 }
 
 function toggleFilebrowserTheme() {
@@ -798,6 +916,8 @@ async function pullProfile() {
     let baseData = json.data;
     // Load zip from data
     zip.loadAsync(baseData, {base64: true}).then(async function(contents) {
+      let pulledFavorites = null;
+      let pulledFavoritesSync = null;
       // Unzip the files to the FS by name
       for await (let fileName of Object.keys(contents.files)) {
         if (fileName.endsWith('/')) {
@@ -809,15 +929,18 @@ async function pullProfile() {
       for await (let fileName of Object.keys(contents.files)) {
         if (! fileName.endsWith('/')) {
           if (fileName === favoritesProfileFile) {
-            zip.file(fileName).async('string').then(function(content) {
-              restoreFavoritesFromProfile(content);
-            });
+            pulledFavorites = await zip.file(fileName).async('string');
+          } else if (fileName === favoritesSyncProfileFile) {
+            pulledFavoritesSync = await zip.file(fileName).async('string');
           } else {
           zip.file(fileName).async('arraybuffer').then(function(content) {
             fs.writeFileSync('/' + fileName, Buffer.from(content));
           });
           }
         }
+      }
+      if (pulledFavorites !== null || pulledFavoritesSync !== null) {
+        restoreFavoritesFromProfile(pulledFavorites, pulledFavoritesSync);
       }
       await new Promise(resolve => setTimeout(resolve, 2000));
       window.location.reload();
@@ -841,6 +964,8 @@ async function defaultProfile() {
     let baseData = json.data;
     // Load zip from data
     zip.loadAsync(baseData, {base64: true}).then(async function(contents) {
+      let pulledFavorites = null;
+      let pulledFavoritesSync = null;
       // Unzip the files to the FS by name
       for await (let fileName of Object.keys(contents.files)) {
         if (fileName.endsWith('/')) {
@@ -852,15 +977,18 @@ async function defaultProfile() {
       for await (let fileName of Object.keys(contents.files)) {
         if (! fileName.endsWith('/')) {
           if (fileName === favoritesProfileFile) {
-            zip.file(fileName).async('string').then(function(content) {
-              restoreFavoritesFromProfile(content);
-            });
+            pulledFavorites = await zip.file(fileName).async('string');
+          } else if (fileName === favoritesSyncProfileFile) {
+            pulledFavoritesSync = await zip.file(fileName).async('string');
           } else {
           zip.file(fileName).async('arraybuffer').then(function(content) {
             fs.writeFileSync('/' + fileName, Buffer.from(content));
           });
           }
         }
+      }
+      if (pulledFavorites !== null || pulledFavoritesSync !== null) {
+        restoreFavoritesFromProfile(pulledFavorites, pulledFavoritesSync);
       }
       await new Promise(resolve => setTimeout(resolve, 2000));
       window.location.reload();
@@ -895,6 +1023,7 @@ async function pushProfile() {
     await addToZip(item);
   }
   zip.file(favoritesProfileFile, getFavoritesForProfile());
+  zip.file(favoritesSyncProfileFile, getFavoritesSyncForProfile());
   zip.generateAsync({type:"base64"}).then(async function callback(base64) {
     try {
       let user = localStorage.getItem('user');

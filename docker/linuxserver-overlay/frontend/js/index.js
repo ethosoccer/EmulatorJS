@@ -22,6 +22,8 @@ var searchSourceConfigs = {};
 var profileEndpoint = 'profile';
 var profileStoreName = 'RetroArch';
 var favoritesProfileFile = '.emulatorjs-favorites.json';
+var favoritesSyncProfileFile = '.emulatorjs-favorites-sync.json';
+var favoritesSyncStorageKey = 'ejsFavoritesSync';
 var profileFs;
 var profileFsReady;
 var profilePushTimer;
@@ -153,18 +155,175 @@ function getFavorites() {
   return [];
 }
 function saveFavorites(favorites) {
-  localStorage.setItem('ejsFavorites', JSON.stringify(favorites));
+  var normalized = normalizeFavoritesList(favorites);
+  localStorage.setItem('ejsFavorites', JSON.stringify(normalized));
+  syncFavoritesStateWithList(normalized);
 }
-function restoreFavoritesFromProfile(data) {
-  if (!hasUsableValue(data)) {
-    return;
+function normalizeFavoritesList(favorites) {
+  if (!Array.isArray(favorites)) {
+    return [];
   }
+  return favorites.map(function(favorite) {
+    if (typeof favorite === 'string') {
+      return {id: favorite};
+    }
+    return favorite;
+  }).filter(function(favorite) {
+    return favorite && favorite.id && favorite.id !== 'undefined' && favorite.id.indexOf('undefined::') !== 0;
+  }).map(function(favorite) {
+    favorite.name = cleanGameName(favorite.name, favorite.id);
+    favorite.exactName = hasUsableValue(favorite.exactName) ? favorite.exactName : favorite.name;
+    favorite.root = hasUsableValue(favorite.root) ? favorite.root : 'main';
+    favorite.title = hasUsableValue(favorite.title) ? favorite.title : 'Games';
+    favorite.index = Number(favorite.index || 0);
+    return favorite;
+  });
+}
+function readFavoritesSyncState() {
   try {
-    JSON.parse(data);
-    localStorage.setItem('ejsFavorites', data);
+    var parsed = JSON.parse(localStorage.getItem(favoritesSyncStorageKey) || '{}');
+    if (parsed && parsed.records && typeof parsed.records === 'object') {
+      return parsed;
+    }
   } catch(e) {
     console.log(e);
   }
+  return {version: 1, records: {}};
+}
+function writeFavoritesSyncState(state) {
+  localStorage.setItem(favoritesSyncStorageKey, JSON.stringify({
+    version: 1,
+    updatedAt: Date.now(),
+    records: state && state.records || {}
+  }));
+}
+function favoriteSyncTimestamp(record) {
+  return Math.max(Number(record && record.updatedAt || 0), Number(record && record.addedAt || 0), Number(record && record.removedAt || 0));
+}
+function upsertFavoriteSyncRecord(favorite, removedAt) {
+  if (!favorite || !favorite.id) {
+    return;
+  }
+  var state = readFavoritesSyncState();
+  var now = Date.now();
+  var existing = state.records[favorite.id] || {};
+  state.records[favorite.id] = {
+    id: favorite.id,
+    favorite: favorite,
+    addedAt: removedAt ? Number(existing.addedAt || now) : now,
+    removedAt: removedAt || null,
+    updatedAt: now
+  };
+  writeFavoritesSyncState(state);
+}
+function syncFavoritesStateWithList(favorites) {
+  var state = readFavoritesSyncState();
+  var changed = false;
+  favorites.forEach(function(favorite) {
+    if (!state.records[favorite.id]) {
+      state.records[favorite.id] = {
+        id: favorite.id,
+        favorite: favorite,
+        addedAt: Date.now(),
+        removedAt: null,
+        updatedAt: Date.now()
+      };
+      changed = true;
+    } else if (!state.records[favorite.id].favorite) {
+      state.records[favorite.id].favorite = favorite;
+      changed = true;
+    }
+  });
+  if (changed) {
+    writeFavoritesSyncState(state);
+  }
+}
+function mergeFavoritesState(baseFavorites, baseSyncData, incomingFavorites, incomingSyncData) {
+  var state = {version: 1, records: {}};
+  function parseFavorites(data) {
+    if (!hasUsableValue(data)) {
+      return [];
+    }
+    try {
+      return normalizeFavoritesList(JSON.parse(data));
+    } catch(e) {
+      console.log(e);
+      return [];
+    }
+  }
+  function parseSync(data) {
+    if (!hasUsableValue(data)) {
+      return null;
+    }
+    try {
+      var parsed = typeof data === 'string' ? JSON.parse(data) : data;
+      return parsed && parsed.records && typeof parsed.records === 'object' ? parsed : null;
+    } catch(e) {
+      console.log(e);
+      return null;
+    }
+  }
+  function seedFavorites(favorites) {
+    favorites.forEach(function(favorite) {
+      if (!state.records[favorite.id]) {
+        state.records[favorite.id] = {
+          id: favorite.id,
+          favorite: favorite,
+          addedAt: 1,
+          removedAt: null,
+          updatedAt: 1
+        };
+      }
+    });
+  }
+  function mergeSync(sync) {
+    if (!sync) {
+      return;
+    }
+    Object.keys(sync.records || {}).forEach(function(id) {
+      var record = sync.records[id];
+      if (!record || !id) {
+        return;
+      }
+      var existing = state.records[id];
+      if (!existing || favoriteSyncTimestamp(record) >= favoriteSyncTimestamp(existing)) {
+        state.records[id] = {
+          id: id,
+          favorite: record.favorite || existing && existing.favorite || {id: id},
+          addedAt: Number(record.addedAt || 0),
+          removedAt: record.removedAt || null,
+          updatedAt: favoriteSyncTimestamp(record)
+        };
+      }
+    });
+  }
+  seedFavorites(parseFavorites(baseFavorites));
+  mergeSync(parseSync(baseSyncData));
+  seedFavorites(parseFavorites(incomingFavorites));
+  mergeSync(parseSync(incomingSyncData));
+  return state;
+}
+function activeFavoritesFromSyncState(state) {
+  return Object.keys(state.records || {}).map(function(id) {
+    return state.records[id];
+  }).filter(function(record) {
+    return record && (!record.removedAt || Number(record.addedAt || 0) > Number(record.removedAt || 0));
+  }).sort(function(a, b) {
+    return Number(a.addedAt || 0) - Number(b.addedAt || 0);
+  }).map(function(record) {
+    return record.favorite || {id: record.id};
+  });
+}
+function restoreFavoritesFromProfile(data, syncData) {
+  var merged = mergeFavoritesState(
+    localStorage.getItem('ejsFavorites') || '[]',
+    localStorage.getItem(favoritesSyncStorageKey) || '',
+    data,
+    syncData
+  );
+  var favorites = normalizeFavoritesList(activeFavoritesFromSyncState(merged));
+  localStorage.setItem('ejsFavorites', JSON.stringify(favorites));
+  writeFavoritesSyncState(merged);
 }
 function profileRequest(body) {
   return fetch(profileEndpoint, {
@@ -2954,20 +3113,27 @@ async function pullServerProfile(silent) {
     var zip = new JSZip();
     var contents = await zip.loadAsync(json.data, {base64: true});
     var pullStamp = Date.now().toString();
+    var pulledFavorites = null;
+    var pulledFavoritesSync = null;
     for await (var fileName of Object.keys(contents.files)) {
-      if (fileName.endsWith('/') && fileName !== favoritesProfileFile) {
+      if (fileName.endsWith('/') && fileName !== favoritesProfileFile && fileName !== favoritesSyncProfileFile) {
         ensureProfileDirSync('/' + fileName.replace(/\/+$/, ''));
       }
     }
     for await (var pullFileName of Object.keys(contents.files)) {
       if (!pullFileName.endsWith('/')) {
         if (pullFileName === favoritesProfileFile) {
-          restoreFavoritesFromProfile(await zip.file(pullFileName).async('string'));
+          pulledFavorites = await zip.file(pullFileName).async('string');
+        } else if (pullFileName === favoritesSyncProfileFile) {
+          pulledFavoritesSync = await zip.file(pullFileName).async('string');
         } else {
           var content = await zip.file(pullFileName).async('arraybuffer');
           await writeProfileFileWithBackup(pullFileName, Buffer.from(content), pullStamp);
         }
       }
+    }
+    if (pulledFavorites !== null || pulledFavoritesSync !== null) {
+      restoreFavoritesFromProfile(pulledFavorites, pulledFavoritesSync);
     }
     setProfileStatus('Pulled from server.');
     if (!$('#favorites-panel').hasClass('hidden')) {
@@ -3000,6 +3166,7 @@ async function pushServerProfile(silent) {
       await addProfileFsToZip(zip, '/' + item);
     }
     zip.file(favoritesProfileFile, localStorage.getItem('ejsFavorites') || '[]');
+    zip.file(favoritesSyncProfileFile, localStorage.getItem(favoritesSyncStorageKey) || JSON.stringify(readFavoritesSyncState()));
     var base64 = await zip.generateAsync({type:"base64"});
     var res = await profileRequest({user:localStorage.getItem('user'), pass:localStorage.getItem('pass'), type:'push', data:base64});
     var json = await res.json();
@@ -3143,8 +3310,11 @@ function toggleFavorite(event, favoriteId, button) {
   });
   var index = favoriteIds.indexOf(favoriteId);
   if (index === -1) {
-    favorites.push(readFavoriteRecord(button, favoriteId));
+    var addedFavorite = readFavoriteRecord(button, favoriteId);
+    favorites.push(addedFavorite);
+    upsertFavoriteSyncRecord(addedFavorite, null);
   } else {
+    upsertFavoriteSyncRecord(favorites[index], Date.now());
     favorites.splice(index, 1);
   }
   saveFavorites(favorites);

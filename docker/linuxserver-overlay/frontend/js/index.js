@@ -1454,8 +1454,11 @@ function saveVersionSummary(save) {
   parts.push(formatBytes(save && save.size));
   return parts.filter(Boolean).join(' - ');
 }
-function groupedSaveSummary(group) {
+function groupedSaveSummary(group, catalogItem) {
   var parts = [];
+  if (catalogItem && catalogItem.root) {
+    parts.push(catalogItem.root);
+  }
   if (group.hasCurrent) {
     parts.push('Current available');
   }
@@ -2314,7 +2317,7 @@ function renderSaveRows(target, saves, emptyMessage, backHandler, options) {
       badges.append($('<span>').addClass('save-file-badge').text(catalogItem ? 'ROM found' : 'ROM not found'));
     }
     detail.append(badges);
-    detail.append($('<span>').addClass('save-file-meta').text(groupedSaveSummary(group)));
+    detail.append($('<span>').addClass('save-file-meta').text(groupedSaveSummary(group, catalogItem)));
     detail.on('click', function(saveGroup) {
       return function() {
         openSaveVersionPicker(saveGroup, backHandler, options);

@@ -5183,8 +5183,14 @@ async function rendermenu(datas) {
     window.location.reload();
   });
   //// Mouse Scrolling ////
+  function wheelEventIsInsideFrontPanel(event) {
+    return $(event.target).closest('.search-panel, .favorites-panel, .save-panel, .variant-panel, .login-panel').length > 0;
+  }
   $('#menu').bind('DOMMouseScroll', function(e){
     if (getActiveFrontPanel()) {
+      if (wheelEventIsInsideFrontPanel(e)) {
+        return;
+      }
       return false;
     }
     if(e.originalEvent.detail > 0) {
@@ -5196,6 +5202,9 @@ async function rendermenu(datas) {
   });
   $('#menu').bind('mousewheel', function(e){
     if (getActiveFrontPanel()) {
+      if (wheelEventIsInsideFrontPanel(e)) {
+        return;
+      }
       return false;
     }
     if(e.originalEvent.wheelDelta < 0) {

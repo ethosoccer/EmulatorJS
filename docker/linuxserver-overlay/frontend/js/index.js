@@ -1292,6 +1292,48 @@ function saveRecordMatchesGame(record, gameBase) {
   var saveKey = saveMatchKey(record.name || record.key || '');
   return gameKey && saveKey && (saveKey.indexOf(gameKey) !== -1 || gameKey.indexOf(saveKey) !== -1);
 }
+function saveCatalogMatchScore(saveName, catalogItem) {
+  var saveKey = saveMatchKey(saveName);
+  if (!saveKey || !catalogItem) {
+    return 0;
+  }
+  var candidates = [
+    {value: catalogItem.romFileName, score: 100},
+    {value: catalogItem.exactName, score: 95},
+    {value: catalogItem.name, score: 80}
+  ];
+  var best = 0;
+  candidates.forEach(function(candidate) {
+    var key = saveMatchKey(candidate.value || '');
+    if (!key) {
+      return;
+    }
+    if (saveKey === key) {
+      best = Math.max(best, candidate.score);
+      return;
+    }
+    if (saveKey.length >= 5 && key.length >= 5 && (saveKey.indexOf(key) !== -1 || key.indexOf(saveKey) !== -1)) {
+      best = Math.max(best, candidate.score - 35);
+    }
+  });
+  return best;
+}
+function resolveSaveGroupCatalogItem(group) {
+  if (!searchCatalog || !searchCatalog.items || !group) {
+    return null;
+  }
+  var best = {score: 0, item: null};
+  searchCatalog.items.forEach(function(item) {
+    var score = saveCatalogMatchScore(group.name, item);
+    (group.versions || []).forEach(function(save) {
+      score = Math.max(score, saveCatalogMatchScore(save.name || save.key, item));
+    });
+    if (score > best.score) {
+      best = {score: score, item: item};
+    }
+  });
+  return best.score >= 60 ? best.item : null;
+}
 function saveVariantGroupKey(record) {
   return String(record.name || record.key || '').toLowerCase();
 }
@@ -2031,6 +2073,67 @@ function downloadSelectorSave(event, button) {
   }
   downloadSaveFile(saveId);
 }
+async function buildCatalogLaunchButton(catalogItem) {
+  if (!catalogItem || !catalogItem.root || !catalogItem.exactName) {
+    return null;
+  }
+  var config = await fetchConfig(catalogItem.root);
+  if (!config || !config.items || !config.items[catalogItem.exactName]) {
+    return null;
+  }
+  $('#menu').data('config', config);
+  $('#menu').data('root', catalogItem.root);
+  var resolved = resolveItem(config.items[catalogItem.exactName], config.defaults || {});
+  var temp = $('<button>');
+  temp.attr('data-name', catalogItem.exactName);
+  temp.attr('data-display-name', catalogItem.name || catalogItem.exactName);
+  temp.attr('data-group-display-name', catalogItem.name || catalogItem.exactName);
+  temp.attr('data-original-index', Number(catalogItem.index || 0));
+  temp.attr('data-close-variant-panel', 'true');
+  temp.attr('data-save-selection-ready', 'true');
+  for (var key of defaultKeys) {
+    temp.attr('data-' + key, String(resolved[key] || ''));
+  }
+  return temp;
+}
+async function launchCatalogItem(catalogItem, saveId) {
+  var launchButton = await buildCatalogLaunchButton(catalogItem);
+  if (!launchButton) {
+    $('#profile-saves-status').text('Matching ROM was not found.');
+    return;
+  }
+  if (saveId) {
+    $('#profile-saves-status').text('Restoring save...');
+    var restored = await restoreSaveForLaunch(saveId);
+    if (!restored) {
+      $('#profile-saves-status').text('Unable to restore that save.');
+      return;
+    }
+  }
+  closeSavePanel();
+  closeLoginPanel();
+  launch(launchButton);
+}
+function favoriteButtonForCatalogItem(catalogItem) {
+  var button = $('<button>')
+    .addClass('panel-icon-button variant-favorite')
+    .attr('type', 'button')
+    .attr('title', isFavorite(catalogItem.id) ? 'Remove from favorites' : 'Add to favorites')
+    .attr('aria-label', isFavorite(catalogItem.id) ? 'Remove from favorites' : 'Add to favorites')
+    .attr('aria-pressed', isFavorite(catalogItem.id))
+    .attr('data-favorite-id', catalogItem.id)
+    .attr('data-favorite-name', catalogItem.name || catalogItem.exactName)
+    .attr('data-favorite-exact-name', catalogItem.exactName)
+    .attr('data-favorite-root', catalogItem.root)
+    .attr('data-favorite-title', catalogItem.title || catalogItem.root || 'Games')
+    .attr('data-favorite-index', Number(catalogItem.index || 0))
+    .html('&hearts;');
+  button.toggleClass('is-favorite', isFavorite(catalogItem.id));
+  button.on('click', function(event) {
+    toggleFavorite(event, catalogItem.id, this);
+  });
+  return button;
+}
 function setSavePanelBack(handler) {
   savePanelBackHandler = handler || null;
   $('#save-panel-back').toggleClass('hidden', !savePanelBackHandler);
@@ -2169,6 +2272,26 @@ async function downloadAllSaves() {
   }
   await downloadSaveList(saves.map(function(save) { return save.id; }), 'emulatorjs-saves.zip');
 }
+function launchSaveGroupFromProfile(group, catalogItem, backHandler) {
+  if (!catalogItem || !group || !group.versions || group.versions.length === 0) {
+    return;
+  }
+  if (group.versions.length > 1) {
+    openSaveVersionPicker(group, backHandler, {
+      mode: 'launch',
+      titlePrefix: catalogItem.name || group.name,
+      statusText: 'Choose which save version to restore before launch.',
+      onSelect: async function(saveId) {
+        await launchCatalogItem(catalogItem, saveId);
+      },
+      onSkip: function() {
+        launchCatalogItem(catalogItem, null);
+      }
+    });
+    return;
+  }
+  launchCatalogItem(catalogItem, group.latest && group.latest.id || group.versions[0].id);
+}
 function renderSaveRows(target, saves, emptyMessage, backHandler, options) {
   options = options || {};
   $(target).empty();
@@ -2178,6 +2301,7 @@ function renderSaveRows(target, saves, emptyMessage, backHandler, options) {
   }
   var groups = groupSaveVariants(saves);
   for (var group of groups) {
+    var catalogItem = options.enableGameActions ? resolveSaveGroupCatalogItem(group) : null;
     var row = $('<div>').addClass('save-file-row');
     var detail = $('<button>').addClass('search-result').attr('type', 'button');
     detail.append($('<span>').addClass('save-file-title').text(safeDecodeDisplayName(group.name)));
@@ -2186,6 +2310,9 @@ function renderSaveRows(target, saves, emptyMessage, backHandler, options) {
       badges.append($('<span>').addClass('save-file-badge').text('Current available'));
     }
     badges.append($('<span>').addClass('save-file-badge').text(group.versions.length + ' version' + (group.versions.length === 1 ? '' : 's')));
+    if (options.enableGameActions) {
+      badges.append($('<span>').addClass('save-file-badge').text(catalogItem ? 'ROM found' : 'ROM not found'));
+    }
     detail.append(badges);
     detail.append($('<span>').addClass('save-file-meta').text(groupedSaveSummary(group)));
     detail.on('click', function(saveGroup) {
@@ -2199,9 +2326,34 @@ function renderSaveRows(target, saves, emptyMessage, backHandler, options) {
         openSaveVersionPicker(saveGroup, backHandler, options);
       };
     }(group));
-    row.append(detail, download);
+    if (options.enableGameActions) {
+      var actions = $('<div>').addClass('save-actions');
+      var launchButton = $('<button>')
+        .addClass('panel-icon-button')
+        .attr('type', 'button')
+        .attr('title', catalogItem ? 'Launch with save' : 'Matching ROM not found')
+        .attr('aria-label', catalogItem ? 'Launch with save' : 'Matching ROM not found')
+        .prop('disabled', !catalogItem)
+        .html('&#9654;');
+      launchButton.on('click', function(saveGroup, matchedItem) {
+        return function(event) {
+          event.preventDefault();
+          event.stopPropagation();
+          launchSaveGroupFromProfile(saveGroup, matchedItem, backHandler);
+        };
+      }(group, catalogItem));
+      actions.append(launchButton);
+      if (catalogItem) {
+        actions.append(favoriteButtonForCatalogItem(catalogItem));
+      }
+      actions.append(download);
+      row.append(detail, actions);
+    } else {
+      row.append(detail, download);
+    }
     $(target).append(row);
   }
+  refreshFavoriteButtons();
 }
 function closeSavePanel() {
   setSavePanelBack(null);
@@ -2737,11 +2889,18 @@ async function openGameSaves(event, gameName, gameBase) {
 async function renderProfileSaves() {
   $('#profile-saves-status').text('Scanning local saves...');
   $('#profile-saves-results').empty();
+  try {
+    await ensureSearchCatalog();
+  } catch(e) {
+    console.log('Unable to load game catalog for save actions', e);
+  }
   var saves = await getSaveInventory(true);
   $('#profile-saves-status').text(saves.length + ' save' + (saves.length === 1 ? '' : 's') + ' found');
   renderSaveRows('#profile-saves-results', saves, 'No local saves found yet.', function() {
     closeSavePanel();
     showProfileTab('saves');
+  }, {
+    enableGameActions: true
   });
 }
 function showProfileTab(tab) {

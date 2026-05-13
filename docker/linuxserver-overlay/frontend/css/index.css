@@ -1125,6 +1125,18 @@ body.profile-required .profile-login-copy {
   align-items: stretch;
 }
 
+.save-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.save-actions .panel-icon-button:disabled {
+  cursor: not-allowed;
+  opacity: .45;
+}
+
 .save-file-title {
   display: block;
   overflow-wrap: anywhere;

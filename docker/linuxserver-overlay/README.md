@@ -62,6 +62,8 @@ The file browser now shares the modern admin styling and dark-mode toggle. Its e
 
 The file browser is treated as an admin surface. Profile logins now include a `role` of `admin` or `user`; if no admin role exists yet, the first existing profile is promoted to `admin` so older installs remain accessible. Set `EMULATORJS_ADMIN_FALLBACK_USER` to choose a specific bootstrap admin profile during migration. Non-admin users do not see the file-browser icon on the main screen, and `/filebrowser.html` shows an admin login gate instead of the file browser.
 
+On a fresh install with no profiles, `/admin/` and `/filebrowser.html` show a first-run setup form for creating the initial admin profile. The setup endpoint is disabled as soon as any profile exists.
+
 File deletion now requires a confirmation dialog. The file browser also includes User Management for admins, including role changes, simple user creation, and an option to require login before showing the main game browser.
 
 ### Frontend Cache Policy

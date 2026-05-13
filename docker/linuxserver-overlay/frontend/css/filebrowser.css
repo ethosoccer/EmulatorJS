@@ -116,6 +116,29 @@ body.modal-open {
   color: var(--muted);
 }
 
+.setup-panel {
+  max-width: 520px;
+}
+
+.setup-form {
+  display: grid;
+  gap: 8px;
+}
+
+.setup-form label {
+  font-weight: 800;
+}
+
+.setup-status {
+  min-height: 22px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.setup-status.is-error {
+  color: var(--danger);
+}
+
 .setting-row {
   display: flex;
   align-items: center;

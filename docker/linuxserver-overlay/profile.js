@@ -84,8 +84,7 @@ function defaultSettings() {
 }
 
 async function readProfiles() {
-  let profileJson = await fsw.readFile(home + '/profile/profile.json', 'utf8');
-  let profiles = JSON.parse(profileJson);
+  let profiles = await readProfileRecords();
   let changed = false;
   let hasAdmin = Object.keys(profiles).some(function(userHash) {
     return profiles[userHash] && profiles[userHash].role === 'admin';
@@ -126,7 +125,20 @@ async function readProfiles() {
   return profiles;
 }
 
+async function readProfileRecords() {
+  try {
+    let profileJson = await fsw.readFile(home + '/profile/profile.json', 'utf8');
+    return JSON.parse(profileJson);
+  } catch(e) {
+    if (e && e.code === 'ENOENT') {
+      return {};
+    }
+    throw e;
+  }
+}
+
 async function writeProfiles(profile) {
+  await fsw.mkdir(home + '/profile', {recursive: true});
   await fsw.writeFile(home + '/profile/profile.json', JSON.stringify(profile, null, 2));
 }
 
@@ -167,6 +179,34 @@ function findUserHash(profile, username) {
     }
   }
   return null;
+}
+
+async function bootstrapRequired() {
+  let profile = await readProfileRecords();
+  return Object.keys(profile).length === 0;
+}
+
+async function createBootstrapAdmin(user, pass) {
+  if (!await bootstrapRequired()) {
+    return false;
+  }
+  if (!isValidUsername(user) || !isStrongPassword(pass)) {
+    return false;
+  }
+  let profile = {};
+  let hash = hashProfile(user, pass);
+  profile[hash] = {
+    username: user,
+    role: 'admin',
+    settingsOverrides: normalizeUserOverrides()
+  };
+  await writeProfiles(profile);
+  let profilePath = path.join(home, 'profile', user);
+  if (!fs.existsSync(profilePath)) {
+    await fsw.mkdir(profilePath, {recursive: true});
+    await fsw.writeFile(path.join(profilePath, 'retroarch.cfg'), '');
+  }
+  return true;
 }
 
 function normalizeIp(value) {
@@ -943,10 +983,22 @@ app.post('/*', async function(req, res) {
         }
         res.json({
           status: 'success',
+          setupRequired: await bootstrapRequired(),
           requireLogin: resolved.requireLogin === true,
           selectorStyle: resolved.selectorStyle === 'popup' ? 'popup' : 'menu',
           launchErrorDebug: resolved.launchErrorDebug === true
         });
+      } else if (type == 'bootstrapadmin') {
+        if (!consumeRateLimit(authAttempts, requestIp(req), AUTH_ATTEMPT_LIMIT, RATE_LIMIT_WINDOW_MS)) {
+          res.status(429).json(error);
+          return;
+        }
+        let created = await createBootstrapAdmin(req.body.user, req.body.pass);
+        if (!created) {
+          res.json(error);
+          return;
+        }
+        res.json({status: 'success', user: req.body.user, role: 'admin'});
       } else if (type == 'default') {
       try {
         let profilePath = home + '/profile/default/';

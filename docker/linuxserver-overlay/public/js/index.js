@@ -123,6 +123,75 @@ function adminEndpoint(name) {
   return basePath + name;
 }
 
+function setAdminBootstrapStatus(message, isError) {
+  $('#admin-bootstrap-status').text(message || '').toggleClass('is-error', !!isError);
+}
+
+async function refreshAdminBootstrapState() {
+  try {
+    var response = await fetch(adminEndpoint('profileapi'), {
+      method: 'POST',
+      headers: {Accept: 'application/json', 'Content-Type': 'application/json'},
+      body: JSON.stringify({type: 'publicsettings'})
+    });
+    var result = await response.json();
+    if (result.status === 'success' && result.setupRequired === true) {
+      $('#admin-login-form').addClass('hidden');
+      $('#admin-bootstrap-form').removeClass('hidden');
+      window.setTimeout(function() {
+        $('#admin-bootstrap-user').trigger('focus');
+      }, 50);
+      return true;
+    }
+  } catch(e) {
+    console.log(e);
+  }
+  $('#admin-bootstrap-form').addClass('hidden');
+  $('#admin-login-form').removeClass('hidden');
+  return false;
+}
+
+async function createBootstrapAdminFromManager() {
+  var user = $('#admin-bootstrap-user').val();
+  var pass = $('#admin-bootstrap-pass').val();
+  var confirm = $('#admin-bootstrap-pass-confirm').val();
+  if (!user || !pass) {
+    setAdminBootstrapStatus('Enter a username and password.', true);
+    return;
+  }
+  if (pass.length < 10) {
+    setAdminBootstrapStatus('Password must be at least 10 characters.', true);
+    return;
+  }
+  if (pass !== confirm) {
+    setAdminBootstrapStatus('Passwords do not match.', true);
+    return;
+  }
+  setAdminBootstrapStatus('Creating admin profile...');
+  try {
+    var response = await fetch(adminEndpoint('profileapi'), {
+      method: 'POST',
+      headers: {Accept: 'application/json', 'Content-Type': 'application/json'},
+      body: JSON.stringify({type: 'bootstrapadmin', user: user, pass: pass})
+    });
+    var result = await response.json();
+    if (result.status !== 'success') {
+      setAdminBootstrapStatus('Unable to create admin profile.', true);
+      return;
+    }
+    $('#admin-bootstrap-pass').val('');
+    $('#admin-bootstrap-pass-confirm').val('');
+    $('#admin-bootstrap-form').addClass('hidden');
+    $('#admin-login-form').removeClass('hidden');
+    $('#admin-login-user').val(user);
+    $('#admin-login-pass').val(pass);
+    authenticateAdmin(user, pass, false);
+  } catch(e) {
+    console.log(e);
+    setAdminBootstrapStatus('Unable to reach setup service.', true);
+  }
+}
+
 function syncAdminSession(silent) {
   if (localStorage.getItem('role') !== 'admin') {
     return;
@@ -251,8 +320,16 @@ $(function() {
     event.preventDefault();
     authenticateAdmin($('#admin-login-user').val(), $('#admin-login-pass').val(), false);
   });
+  $('#admin-bootstrap-form').on('submit', function(event) {
+    event.preventDefault();
+    createBootstrapAdminFromManager();
+  });
   $('#admin-login-user').val(localStorage.getItem('user') || '');
-  syncAdminSession(true);
+  refreshAdminBootstrapState().then(function(setupRequired) {
+    if (!setupRequired) {
+      syncAdminSession(true);
+    }
+  });
 });
 
 socket.on('connect', function() {

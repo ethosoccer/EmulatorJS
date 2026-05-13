@@ -9,13 +9,13 @@
         document.documentElement.setAttribute('data-theme', savedTheme || (prefersDark ? 'dark' : 'light'));
       }());
     </script>
-    <link rel="stylesheet" href="css/filebrowser.css?v=20260503-global-login-default">
+    <link rel="stylesheet" href="css/filebrowser.css?v=20260512-bootstrap-admin">
     <link rel="stylesheet" href="css/vendor/jquery.modal.min.css">
     <script type="text/javascript" src="js/vendor/jquery.min.js"></script>
     <script type="text/javascript" src="js/vendor/jquery.modal.min.js"></script>
     <script type="text/javascript" src="js/vendor/browserfs.min.js"></script>
     <script type="text/javascript" src="js/vendor/jszip.min.js"></script>
-    <script type="text/javascript" src="js/filebrowser.js?v=20260503-global-login-default"></script>
+    <script type="text/javascript" src="js/filebrowser.js?v=20260512-bootstrap-admin"></script>
   </head>
   <body>
   <div id="popup" class="modal">
@@ -43,6 +43,20 @@
   <div id="adminGate" class="gate-panel">
     <h1>Admin Login Required</h1>
     <p>Log in with an admin profile to use the file browser and user management.</p>
+  </div>
+  <div id="bootstrapAdmin" class="gate-panel setup-panel hidden">
+    <h1>Create Admin Profile</h1>
+    <p>This install does not have any profiles yet. Create the first admin account to unlock management tools.</p>
+    <div class="setup-form">
+      <label for="bootstrapUser">Username</label>
+      <input id="bootstrapUser" type="text" autocomplete="username" placeholder="admin">
+      <label for="bootstrapPass">Password</label>
+      <input id="bootstrapPass" type="password" autocomplete="new-password" placeholder="At least 10 characters">
+      <label for="bootstrapPassConfirm">Confirm Password</label>
+      <input id="bootstrapPassConfirm" type="password" autocomplete="new-password" placeholder="Confirm password">
+      <button type="button" onclick="createBootstrapAdmin()">Create Admin</button>
+      <div id="bootstrapStatus" class="setup-status"></div>
+    </div>
   </div>
   <div id="adminContent" class="hidden">
   <div class="hidden toolbar" id="touchpad">

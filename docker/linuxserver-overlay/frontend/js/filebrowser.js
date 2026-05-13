@@ -415,8 +415,83 @@ async function loadProfile() {
   if (ping == 'pong') {
     $('#profile').removeClass('hidden');
   }
+  if (await refreshBootstrapState()) {
+    return;
+  }
   if ((localStorage.getItem('user')) && (localStorage.getItem('pass'))) {
     await verifyLogin();
+  }
+}
+
+function setBootstrapStatus(message, isError) {
+  $('#bootstrapStatus').text(message || '').toggleClass('is-error', !!isError);
+}
+
+async function refreshBootstrapState() {
+  try {
+    let settings = Object.assign({}, postSettings);
+    settings.body = JSON.stringify({type:'publicsettings'});
+    let res = await fetch(endPoint, settings);
+    let json = await res.json();
+    if (json.status == 'success' && json.setupRequired === true) {
+      localStorage.removeItem('user');
+      localStorage.removeItem('pass');
+      localStorage.removeItem('role');
+      $('#loginEntry').addClass('hidden');
+      $('#defaultPull').addClass('hidden');
+      $('#logout').addClass('hidden');
+      $('#syncButtons').addClass('hidden');
+      $('#adminGate').addClass('hidden');
+      $('#adminContent').addClass('hidden');
+      $('#bootstrapAdmin').removeClass('hidden');
+      window.setTimeout(function() {
+        $('#bootstrapUser').trigger('focus');
+      }, 50);
+      return true;
+    }
+  } catch(e) {
+    console.log(e);
+  }
+  $('#bootstrapAdmin').addClass('hidden');
+  return false;
+}
+
+async function createBootstrapAdmin() {
+  let user = $('#bootstrapUser').val();
+  let pass = $('#bootstrapPass').val();
+  let confirm = $('#bootstrapPassConfirm').val();
+  if (!user || !pass) {
+    setBootstrapStatus('Enter a username and password.', true);
+    return;
+  }
+  if (pass.length < 10) {
+    setBootstrapStatus('Password must be at least 10 characters.', true);
+    return;
+  }
+  if (pass !== confirm) {
+    setBootstrapStatus('Passwords do not match.', true);
+    return;
+  }
+  setBootstrapStatus('Creating admin profile...');
+  try {
+    let settings = Object.assign({}, postSettings);
+    settings.body = JSON.stringify({type:'bootstrapadmin', user:user, pass:pass});
+    let res = await fetch(endPoint, settings);
+    let json = await res.json();
+    if (json.status != 'success') {
+      setBootstrapStatus('Unable to create admin profile.', true);
+      return;
+    }
+    localStorage.setItem('user', json.user || user);
+    localStorage.setItem('pass', pass);
+    localStorage.setItem('role', json.role || 'admin');
+    $('#bootstrapPass').val('');
+    $('#bootstrapPassConfirm').val('');
+    $('#bootstrapAdmin').addClass('hidden');
+    loggedIn();
+  } catch(e) {
+    console.log(e);
+    setBootstrapStatus('Unable to reach setup service.', true);
   }
 }
 
@@ -489,6 +564,7 @@ function loggedIn() {
   let user = localStorage.getItem('user');
   let role = localStorage.getItem('role') || 'user';
   $('#loginEntry').addClass('hidden');
+  $('#bootstrapAdmin').addClass('hidden');
   $('#defaultPull').addClass('hidden');
   $('#logout').removeClass('hidden');
   $('#username').text(user + ' (' + role + ')');
@@ -515,6 +591,7 @@ function loggedOut() {
   $('#logout').addClass('hidden');
   $('#defaultPull').removeClass('hidden');
   $('#loginEntry').removeClass('hidden');
+  $('#bootstrapAdmin').addClass('hidden');
   $('#adminContent').addClass('hidden');
   $('#adminGate').removeClass('hidden');
   $('#adminGate').find('p').text('Log in with an admin profile to use the file browser and user management.');

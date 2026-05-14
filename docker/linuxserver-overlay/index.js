@@ -1175,6 +1175,7 @@ function countExistingScanFlags(dir) {
 
 function buildScanEventPayload(job) {
   let result = job && job.result ? job.result : {};
+  let audit = job && job.audit ? job.audit : {};
   let scanSummary = {
     id: job.id,
     type: job.type || '',
@@ -1206,13 +1207,13 @@ function buildScanEventPayload(job) {
     action: 'scan',
     status: job.status === 'completed' ? 'success' : (job.status === 'canceled' ? 'blocked' : 'failed'),
     source: 'admin-scan',
-    username: existingSession ? existingSession.user : '',
-    role: existingSession ? existingSession.role : '',
+    username: audit.username || '',
+    role: audit.role || '',
     time: job.endedAt || new Date().toISOString(),
-    ip: socket.handshake.address || '',
-    host: socket.handshake.headers.host || '',
-    origin: socket.handshake.headers.origin || '',
-    referer: socket.handshake.headers.referer || '',
+    ip: audit.ip || '',
+    host: audit.host || '',
+    origin: audit.origin || '',
+    referer: audit.referer || '',
     requestPath: baseUrl,
     scan: scanSummary,
     details: {
@@ -1628,6 +1629,14 @@ io.on('connection', async function (socket) {
       return created.existing;
     }
     let job = created.job;
+    job.audit = {
+      username: existingSession ? existingSession.user : '',
+      role: existingSession ? existingSession.role : '',
+      ip: socket.handshake.address || '',
+      host: socket.handshake.headers.host || '',
+      origin: socket.handshake.headers.origin || '',
+      referer: socket.handshake.headers.referer || ''
+    };
     appendScanJobLog(job, label + ' started.');
     emitScanJobStarted('started', job, label + ' started.');
     try {

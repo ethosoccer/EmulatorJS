@@ -1501,7 +1501,12 @@ io.on('connection', async function (socket) {
         socket.emit('adminauth', {status: 'error'});
         return;
       }
-      return await handler(data);
+      try {
+        return await handler(data);
+      } catch(e) {
+        console.log('Admin socket handler failed', e);
+        socket.emit('modaldata', 'Admin action failed: ' + (e && e.message ? e.message : 'Unexpected error'));
+      }
     };
   }
 

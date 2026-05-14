@@ -85,6 +85,7 @@ var RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
 var ADMIN_AUTH_LIMIT = 15;
 var USERNAME_REGEX = /^[A-Za-z0-9._-]{3,32}$/;
 var settingsFile = home + '/profile/settings.json';
+var scanHistoryFallbackFile = home + '/profile/scan-history.jsonl';
 var geoLookupCache = new Map();
 var GEO_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 var scanJobs = new Map();
@@ -922,16 +923,17 @@ function runLogDb(command, payload) {
   try {
     let result = spawnSync('python3', [path.join(__dirname, 'logdb.py'), command, path.join(home, 'profile', 'activity.db')], {
       input: JSON.stringify(payload || {}),
-      encoding: 'utf8'
+      encoding: 'utf8',
+      maxBuffer: 10 * 1024 * 1024
     });
     if (result.status !== 0) {
       console.log('logdb error', result.stderr || result.stdout);
-      return {status: 'error'};
+      return {status: 'error', message: result.stderr || result.stdout || 'logdb exited with status ' + result.status};
     }
     return JSON.parse(result.stdout || '{}');
   } catch (e) {
     console.log('logdb invoke failed', e);
-    return {status: 'error'};
+    return {status: 'error', message: e && e.message ? e.message : String(e)};
   }
 }
 
@@ -1221,6 +1223,69 @@ function buildScanEventPayload(job) {
   };
 }
 
+function scanEventToHistoryRow(eventPayload, fallbackIndex) {
+  let scan = eventPayload && eventPayload.scan ? eventPayload.scan : {};
+  return {
+    id: fallbackIndex || 0,
+    scan_id: scan.id || '',
+    timestamp: eventPayload.time || scan.startedAt || new Date().toISOString(),
+    ended_at: scan.endedAt || '',
+    scan_type: scan.type || '',
+    label: scan.label || '',
+    target: scan.target || '',
+    mode: scan.mode || '',
+    status: scan.status || '',
+    total_items: parseInt(scan.totalItems || 0, 10),
+    processed_items: parseInt(scan.processedItems || 0, 10),
+    new_items: parseInt(scan.newItems || 0, 10),
+    changed_items: parseInt(scan.changedItems || 0, 10),
+    skipped_items: parseInt(scan.skippedItems || 0, 10),
+    downloaded_items: parseInt(scan.downloadedItems || 0, 10),
+    failed_items: parseInt(scan.failedItems || 0, 10),
+    details: eventPayload || {}
+  };
+}
+
+async function appendScanHistoryFallback(eventPayload) {
+  try {
+    await fsw.mkdir(path.dirname(scanHistoryFallbackFile), {recursive: true});
+    await fsw.appendFile(scanHistoryFallbackFile, JSON.stringify(eventPayload) + '\n');
+    console.log('Scan history fallback stored for', eventPayload && eventPayload.scan && eventPayload.scan.id || 'unknown scan');
+  } catch(e) {
+    console.log('Scan history fallback write failed', e);
+  }
+}
+
+async function readScanHistoryFallback(limit) {
+  try {
+    let content = await fsw.readFile(scanHistoryFallbackFile, 'utf8');
+    let lines = content.split('\n').filter(Boolean).slice(-Math.max(limit || 200, 1));
+    return lines.map(function(line, index) {
+      try {
+        return scanEventToHistoryRow(JSON.parse(line), -1 * (index + 1));
+      } catch(e) {
+        return null;
+      }
+    }).filter(Boolean);
+  } catch(e) {
+    return [];
+  }
+}
+
+function mergeScanHistories(primary, fallback, limit) {
+  let seen = new Set();
+  return (primary || []).concat(fallback || []).filter(function(row) {
+    let key = row.scan_id || [row.timestamp, row.scan_type, row.target, row.mode, row.status].join('|');
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  }).sort(function(a, b) {
+    return new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime();
+  }).slice(0, limit || 200);
+}
+
 async function persistAndForwardScan(job) {
   if (!job) {
     return;
@@ -1228,10 +1293,16 @@ async function persistAndForwardScan(job) {
   let settings = await readSettings();
   let eventPayload = buildScanEventPayload(job);
   if (settings.localScansEnabled !== false) {
-    runLogDb('write-scan', {
+    let writeResult = runLogDb('write-scan', {
       retentionDays: settings.localScanRetentionDays || 90,
       entry: eventPayload
     });
+    if (!writeResult || writeResult.status !== 'success') {
+      console.log('Scan history DB write failed', writeResult && writeResult.message || writeResult);
+      await appendScanHistoryFallback(eventPayload);
+    } else {
+      console.log('Scan history stored for', eventPayload.scan && eventPayload.scan.id || 'unknown scan');
+    }
   }
   try {
     if (settings.passwordResetWebhook) {
@@ -1501,12 +1572,14 @@ io.on('connection', async function (socket) {
   };
 
   function renderScansView() {
-    readSettings().then(function(settings) {
+    readSettings().then(async function(settings) {
       let scans = runLogDb('query-scans', {filters: {limit: 200}});
+      let fallbackScans = await readScanHistoryFallback(200);
+      let mergedScans = mergeScanHistories(scans.scans || [], fallbackScans, 200);
       socket.emit('renderscans', {
         jobs: currentSerializedScanJobs(),
-        scans: scans.scans || [],
-        total: scans.total || 0,
+        scans: mergedScans,
+        total: Math.max(scans.total || 0, mergedScans.length),
         settings: {
           localScansEnabled: settings.localScansEnabled !== false,
           localScanRetentionDays: settings.localScanRetentionDays || 90,

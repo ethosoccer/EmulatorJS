@@ -13,6 +13,50 @@ var userOverrideHelp = {
   selectorStyle: 'Use popup game/save selectors instead of the controller-friendly full menu selector',
   launchErrorDebug: 'Show in-game launch error overlay for debugging'
 };
+var nextcloudScopes = [
+  {
+    id: 'roms',
+    label: 'ROMs',
+    description: 'Game files under each system roms folder.',
+    placeholder: '/EmulatorJS/roms'
+  },
+  {
+    id: 'artwork',
+    label: 'Artwork',
+    description: 'Logos, backgrounds, and corner images.',
+    placeholder: '/EmulatorJS/artwork'
+  },
+  {
+    id: 'videos',
+    label: 'Videos',
+    description: 'Preview videos and video position metadata.',
+    placeholder: '/EmulatorJS/videos'
+  },
+  {
+    id: 'emulatorConfig',
+    label: 'Emulator config, metadata, and hashes',
+    description: 'Console config JSON, metadata overrides, hashes, scan state, and generated indexes.',
+    placeholder: '/EmulatorJS/config-metadata'
+  },
+  {
+    id: 'profiles',
+    label: 'Profiles, saves, states, and favorites',
+    description: 'Server profile folders, save/state history, favorites sync data, and profile records.',
+    placeholder: '/EmulatorJS/profiles'
+  },
+  {
+    id: 'activity',
+    label: 'Activity logs and settings',
+    description: 'Server settings, activity database, scan history, and related admin logs.',
+    placeholder: '/EmulatorJS/activity'
+  },
+  {
+    id: 'fullData',
+    label: 'Full /data folder',
+    description: 'Everything in the server data folder. This may be very large.',
+    placeholder: '/EmulatorJS/full-data'
+  }
+];
 
 function booleanOverrideSelect(value, title) {
   return $('<select>').attr('title', title)
@@ -181,6 +225,179 @@ function toggleFilebrowserTheme() {
 
 function updateThemeToggle() {
   $('#theme-toggle').text($('html').attr('data-theme') === 'dark' ? 'Light mode' : 'Dark mode');
+}
+
+function showFilebrowserTab(tab) {
+  $('.admin-tab').removeClass('active');
+  $('.admin-tab[data-tab="' + tab + '"]').addClass('active');
+  $('.tab-panel').addClass('hidden').removeClass('active');
+  $('#tab-' + tab).removeClass('hidden').addClass('active');
+  if (tab === 'users') {
+    loadUsers();
+    loadAdminSettings();
+  }
+  if (tab === 'nextcloud') {
+    renderNextcloudScopes();
+    loadNextcloudSettings();
+  }
+}
+
+function browserTimeZone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+  } catch(e) {
+    return '';
+  }
+}
+
+function clonePostBody(body) {
+  return {
+    method: 'POST',
+    headers: {Accept:'application/json','Content-Type':'application/json'},
+    body: JSON.stringify(body)
+  };
+}
+
+function renderNextcloudScopes() {
+  let wrapper = $('#nextcloudScopes');
+  if (wrapper.children().length) {
+    return;
+  }
+  nextcloudScopes.forEach(function(scope) {
+    let row = $('<div>').addClass('scope-row').attr('data-scope', scope.id);
+    let checkbox = $('<input>').attr({
+      id: 'nextcloudScope-' + scope.id,
+      type: 'checkbox',
+      title: 'Include ' + scope.label + ' in archive and/or mirror backup jobs'
+    });
+    let label = $('<label>').addClass('scope-toggle').attr({
+      for: 'nextcloudScope-' + scope.id,
+      title: scope.description
+    }).append(checkbox, $('<span>').text(scope.label));
+    let detail = $('<span>').addClass('scope-description').text(scope.description);
+    let path = $('<input>').attr({
+      id: 'nextcloudPath-' + scope.id,
+      type: 'text',
+      placeholder: scope.placeholder,
+      title: 'Independent Nextcloud destination folder for ' + scope.label
+    });
+    row.append(label, detail, path);
+    wrapper.append(row);
+  });
+}
+
+function updateNextcloudScheduleVisibility() {
+  let schedule = $('#nextcloudScheduleType').val();
+  $('.nextcloud-weekly-field').toggleClass('hidden', schedule !== 'weekly');
+  $('.nextcloud-monthly-field').toggleClass('hidden', schedule !== 'monthly');
+}
+
+function nextcloudStatus(message, isError) {
+  $('#nextcloudStatus').text(message || '').toggleClass('is-error', !!isError);
+}
+
+function nextcloudPayload(includePassword) {
+  let scopes = {};
+  nextcloudScopes.forEach(function(scope) {
+    scopes[scope.id] = {
+      enabled: $('#nextcloudScope-' + scope.id).prop('checked') === true,
+      remotePath: String($('#nextcloudPath-' + scope.id).val() || '').trim()
+    };
+  });
+  let payload = {
+    url: String($('#nextcloudUrl').val() || '').trim(),
+    username: String($('#nextcloudUsername').val() || '').trim(),
+    clearAppPassword: $('#nextcloudClearPassword').prop('checked') === true,
+    mode: $('#nextcloudMode').val(),
+    archiveType: 'zip',
+    retention: {
+      mode: $('#nextcloudRetentionMode').val(),
+      value: Number($('#nextcloudRetentionValue').val() || 0)
+    },
+    schedule: {
+      type: $('#nextcloudScheduleType').val(),
+      time: $('#nextcloudScheduleTime').val() || '03:00',
+      dayOfWeek: Number($('#nextcloudScheduleDayOfWeek').val() || 0),
+      dayOfMonth: Number($('#nextcloudScheduleDayOfMonth').val() || 1),
+      timeZone: browserTimeZone()
+    },
+    mirrorDelete: $('#nextcloudMirrorDelete').prop('checked') === true,
+    scopes: scopes
+  };
+  if (includePassword) {
+    payload.appPassword = String($('#nextcloudAppPassword').val() || '');
+  }
+  return payload;
+}
+
+function applyNextcloudSettings(settings) {
+  settings = settings || {};
+  renderNextcloudScopes();
+  $('#nextcloudUrl').val(settings.url || '');
+  $('#nextcloudUsername').val(settings.username || '');
+  $('#nextcloudAppPassword').val('').attr('placeholder', settings.appPasswordConfigured ? 'App password configured - leave blank to keep' : 'Paste app password');
+  $('#nextcloudClearPassword').prop('checked', false);
+  $('#nextcloudMode').val(settings.mode || 'archive');
+  $('#nextcloudArchiveType').val('zip');
+  $('#nextcloudRetentionMode').val(settings.retention && settings.retention.mode || 'forever');
+  $('#nextcloudRetentionValue').val(settings.retention && settings.retention.value ? settings.retention.value : '');
+  $('#nextcloudScheduleType').val(settings.schedule && settings.schedule.type || 'manual');
+  $('#nextcloudScheduleTime').val(settings.schedule && settings.schedule.time || '03:00');
+  $('#nextcloudScheduleDayOfWeek').val(String(settings.schedule && Number(settings.schedule.dayOfWeek) || 0));
+  $('#nextcloudScheduleDayOfMonth').val(settings.schedule && settings.schedule.dayOfMonth || 1);
+  $('#nextcloudMirrorDelete').prop('checked', settings.mirrorDelete === true);
+  let scopes = settings.scopes || {};
+  nextcloudScopes.forEach(function(scope) {
+    $('#nextcloudScope-' + scope.id).prop('checked', scopes[scope.id] && scopes[scope.id].enabled === true);
+    $('#nextcloudPath-' + scope.id).val(scopes[scope.id] && scopes[scope.id].remotePath || '');
+  });
+  updateNextcloudScheduleVisibility();
+  let status = settings.lastStatus || {};
+  let statusText = status.message || 'Nextcloud settings loaded. No backup jobs have run from this UI yet.';
+  if (settings.schedule && settings.schedule.type && settings.schedule.type !== 'manual') {
+    statusText += ' Schedule timezone: ' + (settings.schedule.timeZone || browserTimeZone() || 'server local time') + '.';
+  }
+  nextcloudStatus(statusText, status.status === 'error');
+}
+
+async function loadNextcloudSettings() {
+  if (localStorage.getItem('role') !== 'admin') {
+    return;
+  }
+  renderNextcloudScopes();
+  nextcloudStatus('Loading Nextcloud settings...');
+  let res = await fetch(endPoint, clonePostBody(adminProfileBody('getnextcloudsettings')));
+  let json = await res.json();
+  if (json.status !== 'success') {
+    nextcloudStatus('Unable to load Nextcloud settings.', true);
+    return;
+  }
+  applyNextcloudSettings(json.nextcloud || {});
+}
+
+async function saveNextcloudSettings() {
+  let payload = nextcloudPayload(true);
+  nextcloudStatus('Saving Nextcloud settings...');
+  let res = await fetch(endPoint, clonePostBody(adminProfileBody('setnextcloudsettings', {nextcloud: payload})));
+  let json = await res.json();
+  if (json.status !== 'success') {
+    nextcloudStatus(json.message || 'Unable to save Nextcloud settings.', true);
+    return;
+  }
+  applyNextcloudSettings(json.nextcloud || {});
+  nextcloudStatus('Nextcloud settings saved.');
+}
+
+async function testNextcloudConnection() {
+  let payload = nextcloudPayload(true);
+  nextcloudStatus('Testing Nextcloud WebDAV access...');
+  let res = await fetch(endPoint, clonePostBody(adminProfileBody('testnextcloudconnection', {nextcloud: payload})));
+  let json = await res.json();
+  if (json.status !== 'success') {
+    nextcloudStatus(json.message || 'Unable to reach Nextcloud WebDAV with these settings.', true);
+    return;
+  }
+  nextcloudStatus(json.message || 'Nextcloud WebDAV connection succeeded.');
 }
 
 // Render file list

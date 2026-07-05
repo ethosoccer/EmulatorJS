@@ -9,13 +9,13 @@
         document.documentElement.setAttribute('data-theme', savedTheme || (prefersDark ? 'dark' : 'light'));
       }());
     </script>
-    <link rel="stylesheet" href="css/filebrowser.css?v=20260512-favorites-merge">
+    <link rel="stylesheet" href="css/filebrowser.css?v=20260705-nextcloud-phase1">
     <link rel="stylesheet" href="css/vendor/jquery.modal.min.css">
     <script type="text/javascript" src="js/vendor/jquery.min.js"></script>
     <script type="text/javascript" src="js/vendor/jquery.modal.min.js"></script>
     <script type="text/javascript" src="js/vendor/browserfs.min.js"></script>
     <script type="text/javascript" src="js/vendor/jszip.min.js"></script>
-    <script type="text/javascript" src="js/filebrowser.js?v=20260512-favorites-merge"></script>
+    <script type="text/javascript" src="js/filebrowser.js?v=20260705-nextcloud-phase1"></script>
   </head>
   <body>
   <div id="popup" class="modal">
@@ -77,16 +77,139 @@
       <p>Manage local browser storage, saves, states, and profile backups.</p>
     </div>
   </header>
-  <section id="buttons" class="file-actions">
-    <input id="folderName" type="text" placeholder="Enter Directory Name"></input>
-    <button onclick="createFolder()">Create Folder</button>
-    <button onclick="$('#uploadInput').trigger( 'click' )">Upload Files</button>
-    <input class="hidden" id="uploadInput" type='file' onchange="upload(this);" multiple>
-    <button class="right" onclick="downloadBackup()">DL Full Backup</button>
-    <button class="right" onclick="$('#uploadBackup').trigger( 'click' )">Upload Full Backup</button>
-    <input class="hidden" id="uploadBackup" type='file' onchange="uploadBackup(this);" />
+  <nav class="admin-tabs" aria-label="File browser sections">
+    <button class="admin-tab active" type="button" data-tab="files" onclick="showFilebrowserTab('files')" title="Browse and manage files in the current file browser storage">Files</button>
+    <button class="admin-tab" type="button" data-tab="profiles" onclick="showFilebrowserTab('profiles')" title="Push, pull, and restore browser profile data">Profiles</button>
+    <button class="admin-tab" type="button" data-tab="users" onclick="showFilebrowserTab('users')" title="Open user management and global browser settings">Users</button>
+    <button class="admin-tab" type="button" data-tab="nextcloud" onclick="showFilebrowserTab('nextcloud')" title="Configure manual and scheduled Nextcloud backups">Nextcloud Backup</button>
+  </nav>
+  <section id="tab-files" class="tab-panel active">
+    <section id="buttons" class="file-actions">
+      <input id="folderName" type="text" placeholder="Enter Directory Name"></input>
+      <button onclick="createFolder()">Create Folder</button>
+      <button onclick="$('#uploadInput').trigger( 'click' )">Upload Files</button>
+      <input class="hidden" id="uploadInput" type='file' onchange="upload(this);" multiple>
+      <button class="right" onclick="downloadBackup()">DL Full Backup</button>
+      <button class="right" onclick="$('#uploadBackup').trigger( 'click' )">Upload Full Backup</button>
+      <input class="hidden" id="uploadBackup" type='file' onchange="uploadBackup(this);" />
+    </section>
+    <div id="filebrowser"></div>
   </section>
-  <div id="filebrowser"></div>
+  <section id="tab-profiles" class="tab-panel hidden">
+    <div class="admin-panel">
+      <h1>Profiles</h1>
+      <p>Use the existing profile sync actions from the top toolbar. These controls are unchanged for compatibility.</p>
+      <div class="file-actions">
+        <button type="button" onclick="pushProfile()" title="Upload this browser profile, saves, states, and favorites to the server profile store">Push to Server</button>
+        <button type="button" onclick="pullProfile()" title="Download this profile from the server and replace local browser profile storage">Pull from Server</button>
+        <button type="button" onclick="defaultProfile()" title="Replace local browser profile storage with the default server profile">Pull Default Config</button>
+      </div>
+    </div>
+  </section>
+  <section id="tab-users" class="tab-panel hidden">
+    <div class="admin-panel">
+      <h1>Users</h1>
+      <p>Create users, update roles, and adjust global browser settings.</p>
+      <button type="button" onclick="showUserManagement()" title="Open the existing user management dialog">Open User Management</button>
+    </div>
+  </section>
+  <section id="tab-nextcloud" class="tab-panel hidden">
+    <div class="admin-panel nextcloud-panel">
+      <div class="section-heading">
+        <div>
+          <h1>Nextcloud Backup</h1>
+          <p>Configure backup destinations and scheduling. Backup execution starts in Phase 2.</p>
+        </div>
+        <button type="button" onclick="loadNextcloudSettings()" title="Reload saved Nextcloud backup settings from the server">Reload</button>
+      </div>
+      <div class="settings-grid">
+        <label title="Your Nextcloud base URL, for example https://cloud.example.com">
+          <span>Nextcloud URL</span>
+          <input id="nextcloudUrl" type="url" placeholder="https://cloud.example.com">
+        </label>
+        <label title="The Nextcloud user id that owns the destination folders">
+          <span>Username</span>
+          <input id="nextcloudUsername" type="text" autocomplete="username" placeholder="nextcloud-user">
+        </label>
+        <label title="Paste a new app password to save it. Saved passwords are kept on the server and are not shown here.">
+          <span>App password</span>
+          <input id="nextcloudAppPassword" type="password" autocomplete="new-password" placeholder="Configured passwords are hidden">
+        </label>
+        <label class="inline-setting" title="Remove the saved Nextcloud app password when settings are saved">
+          <input id="nextcloudClearPassword" type="checkbox">
+          <span>Clear saved app password</span>
+        </label>
+        <label title="Archive creates timestamped zip files. Mirror sync uploads a folder tree. Both does both.">
+          <span>Backup mode</span>
+          <select id="nextcloudMode">
+            <option value="archive">Archive</option>
+            <option value="mirror">Mirror sync</option>
+            <option value="both">Both</option>
+          </select>
+        </label>
+        <label title="Phase 1 supports zip archives only. Additional formats can be added later.">
+          <span>Archive type</span>
+          <select id="nextcloudArchiveType">
+            <option value="zip">Zip</option>
+          </select>
+        </label>
+        <label title="Choose how old archive backups should be cleaned up. This does not apply to mirror sync.">
+          <span>Archive retention</span>
+          <select id="nextcloudRetentionMode">
+            <option value="forever">Keep forever</option>
+            <option value="count">Keep last N backups</option>
+            <option value="days">Delete older than N days</option>
+          </select>
+        </label>
+        <label title="Used when archive retention is set to keep last N backups or delete older than N days">
+          <span>Retention value</span>
+          <input id="nextcloudRetentionValue" type="number" min="1" max="3650" placeholder="30">
+        </label>
+        <label title="Manual only disables scheduling. Daily, weekly, and monthly run at the selected browser-local time.">
+          <span>Schedule</span>
+          <select id="nextcloudScheduleType" onchange="updateNextcloudScheduleVisibility()">
+            <option value="manual">Manual only</option>
+            <option value="daily">Daily</option>
+            <option value="weekly">Weekly</option>
+            <option value="monthly">Monthly</option>
+          </select>
+        </label>
+        <label title="The selected time is saved with your browser timezone and used by the server scheduler">
+          <span>Time of day</span>
+          <input id="nextcloudScheduleTime" type="time" value="03:00">
+        </label>
+        <label class="nextcloud-weekly-field" title="Weekly backups run on this browser-local day">
+          <span>Day of week</span>
+          <select id="nextcloudScheduleDayOfWeek">
+            <option value="0">Sunday</option>
+            <option value="1">Monday</option>
+            <option value="2">Tuesday</option>
+            <option value="3">Wednesday</option>
+            <option value="4">Thursday</option>
+            <option value="5">Friday</option>
+            <option value="6">Saturday</option>
+          </select>
+        </label>
+        <label class="nextcloud-monthly-field" title="Monthly backups run on this day. If the month is shorter, the backup runs on the last day of that month.">
+          <span>Day of month</span>
+          <input id="nextcloudScheduleDayOfMonth" type="number" min="1" max="31" value="1">
+        </label>
+        <label class="inline-setting danger-option" title="When mirror sync runs, delete remote files that are no longer present locally inside each selected destination folder. Leave this off unless Nextcloud is only used for this mirror.">
+          <input id="nextcloudMirrorDelete" type="checkbox">
+          <span>Mirror delete remote extras</span>
+        </label>
+      </div>
+      <h2>Backup Scopes</h2>
+      <p class="subtle-copy">Nothing is selected by default. Each checked scope uses its own independent Nextcloud folder.</p>
+      <div id="nextcloudScopes" class="scope-list"></div>
+      <div id="nextcloudStatus" class="status-panel" role="status">Load settings to see current Nextcloud backup status.</div>
+      <div class="file-actions">
+        <button type="button" onclick="saveNextcloudSettings()" title="Save Nextcloud backup settings on the server">Save Nextcloud Settings</button>
+        <button type="button" onclick="testNextcloudConnection()" title="Check the Nextcloud URL, username, app password, and WebDAV access">Test Connection</button>
+        <button type="button" disabled title="Backup execution will be added in Phase 2">Run Backup Now</button>
+      </div>
+    </div>
+  </section>
   </main>
   </div>
   <section id="userManagement" class="admin-modal hidden" role="dialog" aria-modal="true" aria-labelledby="userManagementTitle" onclick="handleUserManagementBackdrop(event)">

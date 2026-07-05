@@ -595,7 +595,27 @@ function defaultSettings() {
     influxUrl: '',
     influxOrg: '',
     influxBucket: '',
-    influxToken: ''
+    influxToken: '',
+    nextcloud: {
+      url: '',
+      username: '',
+      appPassword: '',
+      mode: 'archive',
+      archiveType: 'zip',
+      retention: {mode: 'forever', value: 0},
+      schedule: {type: 'manual', time: '03:00', dayOfWeek: 0, dayOfMonth: 1, timeZone: ''},
+      mirrorDelete: false,
+      scopes: {
+        roms: {enabled: false, remotePath: ''},
+        artwork: {enabled: false, remotePath: ''},
+        videos: {enabled: false, remotePath: ''},
+        emulatorConfig: {enabled: false, remotePath: ''},
+        profiles: {enabled: false, remotePath: ''},
+        activity: {enabled: false, remotePath: ''},
+        fullData: {enabled: false, remotePath: ''}
+      },
+      lastStatus: {status: 'idle', message: ''}
+    }
   };
 }
 

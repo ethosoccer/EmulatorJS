@@ -193,6 +193,127 @@ body.modal-open {
   margin-bottom: 12px;
 }
 
+.admin-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.admin-tab {
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+}
+
+.admin-tab.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.tab-panel.active {
+  display: block;
+}
+
+.section-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.section-heading h1,
+.nextcloud-panel h2 {
+  margin: 0;
+}
+
+.section-heading p,
+.subtle-copy {
+  margin: 4px 0 0;
+  color: var(--muted);
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  gap: 12px;
+  margin: 16px 0;
+}
+
+.settings-grid label,
+.scope-row {
+  display: grid;
+  gap: 6px;
+  align-content: start;
+}
+
+.settings-grid label > span,
+.scope-toggle {
+  font-weight: 800;
+}
+
+.inline-setting {
+  display: flex !important;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+}
+
+.inline-setting input,
+.scope-toggle input {
+  width: auto;
+  min-height: auto;
+}
+
+.danger-option {
+  color: var(--danger);
+}
+
+.scope-list {
+  display: grid;
+  gap: 10px;
+  margin: 14px 0;
+}
+
+.scope-row {
+  grid-template-columns: minmax(190px, .65fr) minmax(220px, 1fr) minmax(220px, 1fr);
+  align-items: center;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-soft);
+}
+
+.scope-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.scope-description {
+  color: var(--muted);
+}
+
+.status-panel {
+  margin: 14px 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-soft);
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.status-panel.is-error {
+  border-color: color-mix(in srgb, var(--danger) 60%, var(--line));
+  color: var(--danger);
+}
+
 input,
 select {
   min-height: 36px;
@@ -393,7 +514,15 @@ tr:hover {
   }
 
   .modal-actions,
-  .settings-panel {
+  .settings-panel,
+  .settings-grid,
+  .scope-row,
+  .section-heading {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .admin-tabs {
     display: grid;
     grid-template-columns: 1fr;
   }

@@ -81,7 +81,43 @@ function defaultSettings() {
     influxUrl: '',
     influxOrg: '',
     influxBucket: '',
-    influxToken: ''
+    influxToken: '',
+    nextcloud: defaultNextcloudSettings()
+  };
+}
+
+function defaultNextcloudSettings() {
+  return {
+    url: '',
+    username: '',
+    appPassword: '',
+    mode: 'archive',
+    archiveType: 'zip',
+    retention: {
+      mode: 'forever',
+      value: 0
+    },
+    schedule: {
+      type: 'manual',
+      time: '03:00',
+      dayOfWeek: 0,
+      dayOfMonth: 1,
+      timeZone: ''
+    },
+    mirrorDelete: false,
+    scopes: {
+      roms: {enabled: false, remotePath: ''},
+      artwork: {enabled: false, remotePath: ''},
+      videos: {enabled: false, remotePath: ''},
+      emulatorConfig: {enabled: false, remotePath: ''},
+      profiles: {enabled: false, remotePath: ''},
+      activity: {enabled: false, remotePath: ''},
+      fullData: {enabled: false, remotePath: ''}
+    },
+    lastStatus: {
+      status: 'idle',
+      message: ''
+    }
   };
 }
 
@@ -154,6 +190,151 @@ async function readSettings() {
 
 async function writeSettings(settings) {
   await fsw.writeFile(settingsFile, JSON.stringify(Object.assign(defaultSettings(), settings), null, 2));
+}
+
+function sanitizeNextcloudPath(value) {
+  let clean = String(value || '').trim().replace(/\\/g, '/');
+  clean = clean.replace(/\/+/g, '/');
+  if (clean && clean[0] !== '/') {
+    clean = '/' + clean;
+  }
+  return clean;
+}
+
+function normalizeNextcloudSchedule(schedule) {
+  let raw = schedule && typeof schedule === 'object' ? schedule : {};
+  let type = ['manual', 'daily', 'weekly', 'monthly'].includes(raw.type) ? raw.type : 'manual';
+  let time = /^\d{2}:\d{2}$/.test(String(raw.time || '')) ? raw.time : '03:00';
+  let dayOfWeek = Math.max(0, Math.min(Number(raw.dayOfWeek || 0), 6));
+  let dayOfMonth = Math.max(1, Math.min(Number(raw.dayOfMonth || 1), 31));
+  return {
+    type: type,
+    time: time,
+    dayOfWeek: dayOfWeek,
+    dayOfMonth: dayOfMonth,
+    timeZone: String(raw.timeZone || '').trim().slice(0, 80)
+  };
+}
+
+function normalizeNextcloudSettings(input, existing) {
+  let defaults = defaultNextcloudSettings();
+  let previous = Object.assign({}, defaults, existing || {});
+  let raw = input && typeof input === 'object' ? input : {};
+  let scopes = {};
+  Object.keys(defaults.scopes).forEach(function(scopeId) {
+    let source = raw.scopes && raw.scopes[scopeId] || previous.scopes && previous.scopes[scopeId] || {};
+    scopes[scopeId] = {
+      enabled: source.enabled === true,
+      remotePath: sanitizeNextcloudPath(source.remotePath)
+    };
+  });
+  let retentionMode = raw.retention && ['forever', 'count', 'days'].includes(raw.retention.mode) ? raw.retention.mode : previous.retention.mode || 'forever';
+  let retentionValue = Math.max(0, Math.min(parseInt(raw.retention && raw.retention.value || 0, 10) || 0, 3650));
+  let appPassword = previous.appPassword || '';
+  if (raw.clearAppPassword === true) {
+    appPassword = '';
+  } else if (typeof raw.appPassword === 'string' && raw.appPassword.trim()) {
+    appPassword = raw.appPassword.trim();
+  }
+  return {
+    url: String(raw.url || '').trim().replace(/\/+$/, ''),
+    username: String(raw.username || '').trim(),
+    appPassword: appPassword,
+    mode: ['archive', 'mirror', 'both'].includes(raw.mode) ? raw.mode : 'archive',
+    archiveType: 'zip',
+    retention: {
+      mode: retentionMode,
+      value: retentionValue
+    },
+    schedule: normalizeNextcloudSchedule(raw.schedule || previous.schedule),
+    mirrorDelete: raw.mirrorDelete === true,
+    scopes: scopes,
+    lastStatus: previous.lastStatus || defaults.lastStatus
+  };
+}
+
+function publicNextcloudSettings(settings) {
+  let nextcloud = normalizeNextcloudSettings(settings && settings.nextcloud || {}, settings && settings.nextcloud || {});
+  delete nextcloud.appPassword;
+  nextcloud.appPasswordConfigured = !!(settings && settings.nextcloud && settings.nextcloud.appPassword);
+  return nextcloud;
+}
+
+function nextcloudDavUrl(settings, remotePath) {
+  let parsed = new URL(settings.url);
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+    throw new Error('Nextcloud URL must start with http:// or https://.');
+  }
+  let pathParts = sanitizeNextcloudPath(remotePath || '').split('/').filter(Boolean).map(encodeURIComponent).join('/');
+  let base = parsed.pathname.replace(/\/+$/, '') + '/remote.php/dav/files/' + encodeURIComponent(settings.username) + '/';
+  parsed.pathname = base + pathParts;
+  parsed.search = '';
+  parsed.hash = '';
+  return parsed;
+}
+
+function nextcloudRequest(settings, method, remotePath, body) {
+  return new Promise(function(resolve) {
+    let parsed;
+    try {
+      parsed = nextcloudDavUrl(settings, remotePath);
+    } catch(e) {
+      resolve({ok: false, statusCode: 0, message: 'Invalid Nextcloud URL.'});
+      return;
+    }
+    let transport = parsed.protocol === 'https:' ? https : http;
+    let payload = body || '';
+    let headers = {
+      Authorization: 'Basic ' + Buffer.from(settings.username + ':' + settings.appPassword).toString('base64'),
+      'User-Agent': 'EmulatorJS-Nextcloud-Backup',
+      Depth: '0'
+    };
+    if (payload) {
+      headers['Content-Length'] = Buffer.byteLength(payload);
+    }
+    let req = transport.request({
+      method: method,
+      hostname: parsed.hostname,
+      port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
+      path: parsed.pathname + parsed.search,
+      headers: headers,
+      timeout: 15000
+    }, function(res) {
+      let chunks = [];
+      res.on('data', function(chunk) {
+        chunks.push(chunk);
+      });
+      res.on('end', function() {
+        resolve({
+          ok: res.statusCode >= 200 && res.statusCode < 300 || res.statusCode === 207,
+          statusCode: res.statusCode,
+          body: Buffer.concat(chunks).toString('utf8')
+        });
+      });
+    });
+    req.on('timeout', function() {
+      req.destroy(new Error('Nextcloud request timed out.'));
+    });
+    req.on('error', function(e) {
+      resolve({ok: false, statusCode: 0, message: e.message});
+    });
+    if (payload) {
+      req.write(payload);
+    }
+    req.end();
+  });
+}
+
+async function testNextcloudSettings(settings) {
+  if (!settings.url || !settings.username || !settings.appPassword) {
+    return {status: 'error', message: 'Nextcloud URL, username, and app password are required.'};
+  }
+  let response = await nextcloudRequest(settings, 'PROPFIND', '/', '<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/></d:prop></d:propfind>');
+  if (!response.ok) {
+    let detail = response.statusCode ? 'WebDAV returned HTTP ' + response.statusCode + '.' : response.message || 'No response from Nextcloud.';
+    return {status: 'error', message: detail};
+  }
+  return {status: 'success', message: 'Nextcloud WebDAV connection succeeded.'};
 }
 
 function hashProfile(user, pass) {
@@ -1422,6 +1603,31 @@ app.post('/*', async function(req, res) {
             requestedBy: profile[hash].username,
           });
           res.json(sent ? {status: 'success'} : error);
+        } else if (type == 'getnextcloudsettings') {
+          if (currentRole !== 'admin') {
+            res.json(error);
+            return;
+          }
+          let settings = await readSettings();
+          res.json({status: 'success', nextcloud: publicNextcloudSettings(settings)});
+        } else if (type == 'setnextcloudsettings') {
+          if (currentRole !== 'admin') {
+            res.json(error);
+            return;
+          }
+          let settings = await readSettings();
+          settings.nextcloud = normalizeNextcloudSettings(req.body.nextcloud || {}, settings.nextcloud);
+          await writeSettings(settings);
+          res.json({status: 'success', nextcloud: publicNextcloudSettings(settings)});
+        } else if (type == 'testnextcloudconnection') {
+          if (currentRole !== 'admin') {
+            res.json(error);
+            return;
+          }
+          let settings = await readSettings();
+          let testSettings = normalizeNextcloudSettings(req.body.nextcloud || {}, settings.nextcloud);
+          let result = await testNextcloudSettings(testSettings);
+          res.json(result.status === 'success' ? result : {status: 'error', message: result.message || 'Nextcloud connection failed.'});
         } else if (type == 'listprofilesaves') {
           let profilePath = profilePathForUser(profile[hash].username);
           let records = await listSaveVersionRecords(profilePath);

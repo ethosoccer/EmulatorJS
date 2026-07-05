@@ -17,6 +17,7 @@ var error = {status: 'error'};
 var settingsFile = home + '/profile/settings.json';
 var favoritesProfileFile = '.emulatorjs-favorites.json';
 var favoritesSyncProfileFile = '.emulatorjs-favorites-sync.json';
+var dataRoot = fs.existsSync('/data') ? '/data/' : path.join(__dirname, 'frontend', 'user') + '/';
 var authAttempts = new Map();
 var forgotPasswordAttempts = new Map();
 var RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
@@ -25,6 +26,9 @@ var FORGOT_PASSWORD_LIMIT = 5;
 var USERNAME_REGEX = /^[A-Za-z0-9._-]{3,32}$/;
 var geoLookupCache = new Map();
 var GEO_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+var nextcloudBackupJobs = new Map();
+var nextcloudMirrorDeletePreviews = new Map();
+var nextcloudBackupSeq = 1;
 app.use(express.json({ limit: '150MB' }));
 
 function roleFor(profileRecord) {
@@ -102,7 +106,8 @@ function defaultNextcloudSettings() {
       time: '03:00',
       dayOfWeek: 0,
       dayOfMonth: 1,
-      timeZone: ''
+      timeZone: '',
+      lastRunKey: ''
     },
     mirrorDelete: false,
     scopes: {
@@ -212,7 +217,8 @@ function normalizeNextcloudSchedule(schedule) {
     time: time,
     dayOfWeek: dayOfWeek,
     dayOfMonth: dayOfMonth,
-    timeZone: String(raw.timeZone || '').trim().slice(0, 80)
+    timeZone: String(raw.timeZone || '').trim().slice(0, 80),
+    lastRunKey: String(raw.lastRunKey || '').trim().slice(0, 120)
   };
 }
 
@@ -236,6 +242,15 @@ function normalizeNextcloudSettings(input, existing) {
   } else if (typeof raw.appPassword === 'string' && raw.appPassword.trim()) {
     appPassword = raw.appPassword.trim();
   }
+  let normalizedSchedule = normalizeNextcloudSchedule(raw.schedule || previous.schedule);
+  if (raw.schedule && !raw.schedule.lastRunKey && previous.schedule && previous.schedule.lastRunKey) {
+    let previousSchedule = normalizeNextcloudSchedule(previous.schedule);
+    let comparableNow = [normalizedSchedule.type, normalizedSchedule.time, normalizedSchedule.dayOfWeek, normalizedSchedule.dayOfMonth, normalizedSchedule.timeZone].join('|');
+    let comparablePrev = [previousSchedule.type, previousSchedule.time, previousSchedule.dayOfWeek, previousSchedule.dayOfMonth, previousSchedule.timeZone].join('|');
+    if (comparableNow === comparablePrev) {
+      normalizedSchedule.lastRunKey = previousSchedule.lastRunKey;
+    }
+  }
   return {
     url: String(raw.url || '').trim().replace(/\/+$/, ''),
     username: String(raw.username || '').trim(),
@@ -246,7 +261,7 @@ function normalizeNextcloudSettings(input, existing) {
       mode: retentionMode,
       value: retentionValue
     },
-    schedule: normalizeNextcloudSchedule(raw.schedule || previous.schedule),
+    schedule: normalizedSchedule,
     mirrorDelete: raw.mirrorDelete === true,
     scopes: scopes,
     lastStatus: previous.lastStatus || defaults.lastStatus
@@ -257,7 +272,106 @@ function publicNextcloudSettings(settings) {
   let nextcloud = normalizeNextcloudSettings(settings && settings.nextcloud || {}, settings && settings.nextcloud || {});
   delete nextcloud.appPassword;
   nextcloud.appPasswordConfigured = !!(settings && settings.nextcloud && settings.nextcloud.appPassword);
+  nextcloud.nextRun = describeNextcloudNextRun(nextcloud.schedule);
   return nextcloud;
+}
+
+function timezoneParts(date, timeZone) {
+  let formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: timeZone || undefined,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  });
+  let parts = {};
+  formatter.formatToParts(date).forEach(function(part) {
+    if (part.type !== 'literal') {
+      parts[part.type] = part.value;
+    }
+  });
+  let hour = Number(parts.hour || 0);
+  if (hour === 24) {
+    hour = 0;
+  }
+  return {
+    year: Number(parts.year || 0),
+    month: Number(parts.month || 1),
+    day: Number(parts.day || 1),
+    hour: hour,
+    minute: Number(parts.minute || 0)
+  };
+}
+
+function daysInMonth(year, month) {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+function dateKey(parts) {
+  return [
+    String(parts.year).padStart(4, '0'),
+    String(parts.month).padStart(2, '0'),
+    String(parts.day).padStart(2, '0')
+  ].join('-');
+}
+
+function scheduleTimeParts(schedule) {
+  let bits = String(schedule && schedule.time || '03:00').split(':');
+  return {
+    hour: Number(bits[0] || 3),
+    minute: Number(bits[1] || 0)
+  };
+}
+
+function scheduleDueInfo(schedule, now) {
+  schedule = normalizeNextcloudSchedule(schedule);
+  if (schedule.type === 'manual') {
+    return {due: false, key: '', localParts: null};
+  }
+  let local = timezoneParts(now || new Date(), schedule.timeZone);
+  let target = scheduleTimeParts(schedule);
+  if (local.hour !== target.hour || local.minute !== target.minute) {
+    return {due: false, key: '', localParts: local};
+  }
+  if (schedule.type === 'weekly') {
+    let dayOfWeek = new Date(Date.UTC(local.year, local.month - 1, local.day)).getUTCDay();
+    if (dayOfWeek !== Number(schedule.dayOfWeek || 0)) {
+      return {due: false, key: '', localParts: local};
+    }
+  }
+  if (schedule.type === 'monthly') {
+    let targetDay = Math.min(Number(schedule.dayOfMonth || 1), daysInMonth(local.year, local.month));
+    if (local.day !== targetDay) {
+      return {due: false, key: '', localParts: local};
+    }
+  }
+  let key = [schedule.type, dateKey(local), schedule.time, schedule.timeZone || 'server'].join('|');
+  return {
+    due: schedule.lastRunKey !== key,
+    key: key,
+    localParts: local
+  };
+}
+
+function describeNextcloudNextRun(schedule) {
+  schedule = normalizeNextcloudSchedule(schedule);
+  if (schedule.type === 'manual') {
+    return {enabled: false, label: 'Manual only'};
+  }
+  let typeLabel = schedule.type.charAt(0).toUpperCase() + schedule.type.slice(1);
+  let label = typeLabel + ' at ' + schedule.time;
+  if (schedule.type === 'weekly') {
+    label += ' on ' + ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][Number(schedule.dayOfWeek || 0)];
+  }
+  if (schedule.type === 'monthly') {
+    label += ' on day ' + Number(schedule.dayOfMonth || 1) + ' (last day fallback)';
+  }
+  if (schedule.timeZone) {
+    label += ' ' + schedule.timeZone;
+  }
+  return {enabled: true, label: label};
 }
 
 function nextcloudDavUrl(settings, remotePath) {
@@ -273,8 +387,9 @@ function nextcloudDavUrl(settings, remotePath) {
   return parsed;
 }
 
-function nextcloudRequest(settings, method, remotePath, body) {
+function nextcloudRequest(settings, method, remotePath, body, options) {
   return new Promise(function(resolve) {
+    options = options || {};
     let parsed;
     try {
       parsed = nextcloudDavUrl(settings, remotePath);
@@ -287,8 +402,11 @@ function nextcloudRequest(settings, method, remotePath, body) {
     let headers = {
       Authorization: 'Basic ' + Buffer.from(settings.username + ':' + settings.appPassword).toString('base64'),
       'User-Agent': 'EmulatorJS-Nextcloud-Backup',
-      Depth: '0'
+      Depth: options.depth || '0'
     };
+    if (options.contentType) {
+      headers['Content-Type'] = options.contentType;
+    }
     if (payload) {
       headers['Content-Length'] = Buffer.byteLength(payload);
     }
@@ -305,10 +423,11 @@ function nextcloudRequest(settings, method, remotePath, body) {
         chunks.push(chunk);
       });
       res.on('end', function() {
+        let responseBuffer = Buffer.concat(chunks);
         resolve({
           ok: res.statusCode >= 200 && res.statusCode < 300 || res.statusCode === 207,
           statusCode: res.statusCode,
-          body: Buffer.concat(chunks).toString('utf8')
+          body: options.responseType === 'buffer' ? responseBuffer : responseBuffer.toString('utf8')
         });
       });
     });
@@ -329,13 +448,951 @@ async function testNextcloudSettings(settings) {
   if (!settings.url || !settings.username || !settings.appPassword) {
     return {status: 'error', message: 'Nextcloud URL, username, and app password are required.'};
   }
-  let response = await nextcloudRequest(settings, 'PROPFIND', '/', '<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/></d:prop></d:propfind>');
+  let response = await nextcloudRequest(settings, 'PROPFIND', '/', '<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/></d:prop></d:propfind>', {contentType: 'application/xml'});
   if (!response.ok) {
     let detail = response.statusCode ? 'WebDAV returned HTTP ' + response.statusCode + '.' : response.message || 'No response from Nextcloud.';
     return {status: 'error', message: detail};
   }
   return {status: 'success', message: 'Nextcloud WebDAV connection succeeded.'};
 }
+
+async function ensureNextcloudFolder(settings, remotePath) {
+  let clean = sanitizeNextcloudPath(remotePath);
+  if (!clean || clean === '/') {
+    return;
+  }
+  let current = '';
+  let parts = clean.split('/').filter(Boolean);
+  for await (let part of parts) {
+    current += '/' + part;
+    let response = await nextcloudRequest(settings, 'MKCOL', current);
+    if (![200, 201, 204, 301, 405].includes(response.statusCode)) {
+      throw new Error('Unable to create Nextcloud folder ' + current + ' (HTTP ' + (response.statusCode || '0') + ').');
+    }
+  }
+}
+
+async function putNextcloudFile(settings, remotePath, content, contentType) {
+  let clean = sanitizeNextcloudPath(remotePath);
+  await ensureNextcloudFolder(settings, path.posix.dirname(clean));
+  let response = await nextcloudRequest(settings, 'PUT', clean, content, {contentType: contentType || 'application/octet-stream'});
+  if (!response.ok) {
+    throw new Error('Unable to upload ' + clean + ' (HTTP ' + (response.statusCode || '0') + ').');
+  }
+}
+
+async function getNextcloudFile(settings, remotePath) {
+  let clean = sanitizeNextcloudPath(remotePath);
+  let response = await nextcloudRequest(settings, 'GET', clean, '', {responseType: 'buffer'});
+  if (!response.ok) {
+    throw new Error('Unable to download ' + clean + ' (HTTP ' + (response.statusCode || '0') + ').');
+  }
+  return response.body;
+}
+
+function backupTimestampLabel() {
+  return new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_').replace('Z', 'Z');
+}
+
+function selectedNextcloudScopes(settings) {
+  let scopes = settings.scopes || {};
+  return Object.keys(scopes).filter(function(scopeId) {
+    return scopes[scopeId] && scopes[scopeId].enabled === true;
+  });
+}
+
+function assertSupportedNextcloudScopes(settings) {
+  let selected = selectedNextcloudScopes(settings);
+  if (selected.length === 0) {
+    throw new Error('Select at least one backup scope.');
+  }
+  selected.forEach(function(scopeId) {
+    if (!settings.scopes[scopeId].remotePath) {
+      throw new Error('Enter a Nextcloud destination folder for the ' + scopeId + ' scope.');
+    }
+  });
+}
+
+function backupFileRecord(fullPath, relPath, stat, readContent) {
+  return {
+    fullPath: fullPath || '',
+    relPath: String(relPath || '').replace(/\\/g, '/').replace(/^\/+/, ''),
+    stat: stat || {size: 0},
+    readContent: readContent || null
+  };
+}
+
+async function readBackupFileContent(file) {
+  if (typeof file.readContent === 'function') {
+    return await file.readContent();
+  }
+  return await fsw.readFile(file.fullPath);
+}
+
+async function collectProfileBackupFiles() {
+  let files = await collectFiles(path.join(home, 'profile'), '', []);
+  return files.filter(function(file) {
+    let rel = String(file.relPath || '').replace(/\\/g, '/');
+    return rel !== 'settings.json' && rel !== 'activity.db' && rel !== 'scan-history.jsonl';
+  });
+}
+
+async function topLevelDataDirs() {
+  if (!fs.existsSync(dataRoot)) {
+    return [];
+  }
+  let items = await fsw.readdir(dataRoot);
+  let dirs = [];
+  for await (let item of items) {
+    if (/^\./.test(item)) {
+      continue;
+    }
+    let fullPath = path.join(dataRoot, item);
+    try {
+      let stat = await fsw.stat(fullPath);
+      if (stat.isDirectory()) {
+        dirs.push(item);
+      }
+    } catch(e) {}
+  }
+  return dirs;
+}
+
+async function collectExistingRoots(roots) {
+  let files = [];
+  for await (let root of roots) {
+    if (!root || !fs.existsSync(root.fullPath)) {
+      continue;
+    }
+    let stat = await fsw.stat(root.fullPath);
+    if (stat.isDirectory()) {
+      await collectFiles(root.fullPath, root.relRoot || '', files);
+    } else {
+      files.push(backupFileRecord(root.fullPath, root.relRoot || path.basename(root.fullPath), stat));
+    }
+  }
+  return files.map(function(file) {
+    return backupFileRecord(file.fullPath, file.relPath, file.stat, file.readContent);
+  });
+}
+
+async function collectRomsBackupFiles() {
+  let roots = [];
+  let dirs = await topLevelDataDirs();
+  dirs.forEach(function(dir) {
+    roots.push({fullPath: path.join(dataRoot, dir, 'roms'), relRoot: path.posix.join(dir, 'roms')});
+  });
+  return await collectExistingRoots(roots);
+}
+
+async function collectArtworkBackupFiles() {
+  let roots = [];
+  let dirs = await topLevelDataDirs();
+  dirs.forEach(function(dir) {
+    ['logos', 'backgrounds', 'corners'].forEach(function(kind) {
+      roots.push({fullPath: path.join(dataRoot, dir, kind), relRoot: path.posix.join(dir, kind)});
+    });
+  });
+  return await collectExistingRoots(roots);
+}
+
+async function collectVideosBackupFiles() {
+  let roots = [];
+  let dirs = await topLevelDataDirs();
+  dirs.forEach(function(dir) {
+    roots.push({fullPath: path.join(dataRoot, dir, 'videos'), relRoot: path.posix.join(dir, 'videos')});
+  });
+  return await collectExistingRoots(roots);
+}
+
+async function collectEmulatorConfigBackupFiles() {
+  return await collectExistingRoots([
+    {fullPath: path.join(dataRoot, 'config'), relRoot: 'config'},
+    {fullPath: path.join(dataRoot, 'metadata'), relRoot: 'metadata'},
+    {fullPath: path.join(dataRoot, 'hashes'), relRoot: 'hashes'}
+  ]);
+}
+
+function redactedSettingsContent(settings) {
+  let clone = JSON.parse(JSON.stringify(settings || {}));
+  if (clone.passwordResetWebhook) {
+    clone.passwordResetWebhook = '[redacted]';
+  }
+  if (clone.influxToken) {
+    clone.influxToken = '[redacted]';
+  }
+  if (clone.nextcloud && clone.nextcloud.appPassword) {
+    clone.nextcloud.appPassword = '[redacted]';
+  }
+  return Buffer.from(JSON.stringify(clone, null, 2));
+}
+
+async function collectActivityBackupFiles() {
+  let roots = [];
+  let profileRoot = path.join(home, 'profile');
+  [
+    'activity.db',
+    'scan-history.jsonl'
+  ].forEach(function(fileName) {
+    roots.push({fullPath: path.join(profileRoot, fileName), relRoot: fileName});
+  });
+  let files = await collectExistingRoots(roots);
+  let settings = await readSettings();
+  files.push(backupFileRecord('', 'settings.redacted.json', {size: Buffer.byteLength(JSON.stringify(settings || {}))}, async function() {
+    return redactedSettingsContent(settings);
+  }));
+  return files;
+}
+
+async function collectFullDataBackupFiles() {
+  let files = await collectFiles(dataRoot, '', []);
+  return files.filter(function(file) {
+    let rel = String(file.relPath || '').replace(/\\/g, '/');
+    return rel !== '.ipfs' && rel.indexOf('.ipfs/') !== 0;
+  }).map(function(file) {
+    return backupFileRecord(file.fullPath, file.relPath, file.stat, file.readContent);
+  });
+}
+
+async function collectNextcloudScopeFiles(scopeId) {
+  if (scopeId === 'profiles') {
+    return await collectProfileBackupFiles();
+  }
+  if (scopeId === 'roms') {
+    return await collectRomsBackupFiles();
+  }
+  if (scopeId === 'artwork') {
+    return await collectArtworkBackupFiles();
+  }
+  if (scopeId === 'videos') {
+    return await collectVideosBackupFiles();
+  }
+  if (scopeId === 'emulatorConfig') {
+    return await collectEmulatorConfigBackupFiles();
+  }
+  if (scopeId === 'activity') {
+    return await collectActivityBackupFiles();
+  }
+  if (scopeId === 'fullData') {
+    return await collectFullDataBackupFiles();
+  }
+  throw new Error('Unsupported backup scope: ' + scopeId);
+}
+
+function scopeArchivePrefix(scopeId) {
+  return 'emulatorjs-' + scopeId.replace(/[A-Z]/g, function(match) {
+    return '-' + match.toLowerCase();
+  }) + '-';
+}
+
+async function buildScopeArchive(files) {
+  let zip = new JSZip();
+  for await (let file of files) {
+    zip.file(file.relPath, await readBackupFileContent(file));
+  }
+  return await zip.generateAsync({
+    type: 'nodebuffer',
+    compression: 'DEFLATE',
+    compressionOptions: {level: 6}
+  });
+}
+
+async function listNextcloudArchiveFiles(settings, remoteFolder, prefix) {
+  let response = await nextcloudRequest(
+    settings,
+    'PROPFIND',
+    remoteFolder,
+    '<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:getlastmodified/></d:prop></d:propfind>',
+    {depth: '1', contentType: 'application/xml'}
+  );
+  if (!response.ok) {
+    return [];
+  }
+  let entries = [];
+  let hrefMatches = response.body.match(/<d:href>[^<]+<\/d:href>|<D:href>[^<]+<\/D:href>/g) || [];
+  hrefMatches.forEach(function(tag) {
+    let href = tag.replace(/<\/?[A-Za-z]:href>/g, '');
+    let decoded = '';
+    try {
+      decoded = decodeURIComponent(href);
+    } catch(e) {
+      decoded = href;
+    }
+    let name = decoded.split('/').filter(Boolean).pop() || '';
+    if (name.indexOf(prefix) === 0 && /\.zip$/i.test(name)) {
+      entries.push({name: name, remotePath: path.posix.join(sanitizeNextcloudPath(remoteFolder), name)});
+    }
+  });
+  return entries.sort(function(a, b) {
+    return a.name.localeCompare(b.name);
+  });
+}
+
+function parseNextcloudPropfindResponses(body, baseFolder) {
+  let responses = String(body || '').match(/<[A-Za-z]:response[\s\S]*?<\/[A-Za-z]:response>/g) || [];
+  let base = sanitizeNextcloudPath(baseFolder || '').replace(/\/+$/, '');
+  let entries = [];
+  responses.forEach(function(block) {
+    let hrefMatch = block.match(/<[A-Za-z]:href>([\s\S]*?)<\/[A-Za-z]:href>/);
+    if (!hrefMatch) {
+      return;
+    }
+    let decoded = '';
+    try {
+      decoded = decodeURIComponent(hrefMatch[1]);
+    } catch(e) {
+      decoded = hrefMatch[1];
+    }
+    let marker = '/remote.php/dav/files/';
+    let markerIndex = decoded.indexOf(marker);
+    if (markerIndex >= 0) {
+      let afterMarker = decoded.slice(markerIndex + marker.length).split('/').slice(1).join('/');
+      decoded = '/' + afterMarker;
+    }
+    decoded = sanitizeNextcloudPath(decoded);
+    if (decoded === base || decoded === base + '/') {
+      return;
+    }
+    let relPath = decoded.indexOf(base + '/') === 0 ? decoded.slice(base.length + 1) : decoded.replace(/^\/+/, '');
+    if (!relPath) {
+      return;
+    }
+    entries.push({
+      name: relPath.split('/').filter(Boolean).pop() || relPath,
+      relPath: relPath.replace(/\/+$/, ''),
+      remotePath: decoded.replace(/\/+$/, ''),
+      isDirectory: /<[A-Za-z]:collection\s*\/>/.test(block) || /<[A-Za-z]:collection>/.test(block)
+    });
+  });
+  return entries;
+}
+
+async function listNextcloudFolderEntries(settings, remoteFolder) {
+  let response = await nextcloudRequest(
+    settings,
+    'PROPFIND',
+    remoteFolder,
+    '<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/></d:prop></d:propfind>',
+    {depth: '1', contentType: 'application/xml'}
+  );
+  if (!response.ok) {
+    return [];
+  }
+  return parseNextcloudPropfindResponses(response.body, remoteFolder);
+}
+
+async function listNextcloudMirrorFiles(settings, remoteFolder, relativeRoot, into, limit) {
+  into = into || [];
+  limit = limit || 20000;
+  if (into.length >= limit) {
+    return into;
+  }
+  let entries = await listNextcloudFolderEntries(settings, remoteFolder);
+  for await (let entry of entries) {
+    if (into.length >= limit) {
+      break;
+    }
+    let relPath = relativeRoot ? path.posix.join(relativeRoot, entry.name) : entry.name;
+    if (entry.isDirectory) {
+      await listNextcloudMirrorFiles(settings, entry.remotePath, relPath, into, limit);
+    } else {
+      into.push({
+        relPath: relPath,
+        remotePath: entry.remotePath,
+        name: entry.name
+      });
+    }
+  }
+  return into;
+}
+
+function isProtectedMirrorRemoteFile(scopeId, relPath) {
+  let normalized = String(relPath || '').replace(/\\/g, '/');
+  return normalized.indexOf('/') < 0 && normalized.indexOf(scopeArchivePrefix(scopeId)) === 0 && /\.zip$/i.test(normalized);
+}
+
+async function previewScopeMirrorDelete(settings, scopeId, files) {
+  let remoteFolder = settings.scopes[scopeId].remotePath;
+  let localPaths = new Set(files.map(function(file) {
+    return String(file.relPath || '').replace(/\\/g, '/');
+  }));
+  let remoteFiles = await listNextcloudMirrorFiles(settings, remoteFolder, '', [], 20000);
+  return remoteFiles.filter(function(file) {
+    return !localPaths.has(file.relPath) && !isProtectedMirrorRemoteFile(scopeId, file.relPath);
+  });
+}
+
+function cleanupMirrorDeletePreviews() {
+  let cutoff = Date.now() - 30 * 60 * 1000;
+  Array.from(nextcloudMirrorDeletePreviews.entries()).forEach(function(entry) {
+    if (!entry[1] || entry[1].createdAt < cutoff) {
+      nextcloudMirrorDeletePreviews.delete(entry[0]);
+    }
+  });
+}
+
+function mirrorDeletePreviewKey(settings) {
+  let scopes = {};
+  selectedNextcloudScopes(settings).forEach(function(scopeId) {
+    scopes[scopeId] = settings.scopes[scopeId] && settings.scopes[scopeId].remotePath || '';
+  });
+  return crypto.createHash('sha256').update(JSON.stringify({
+    url: settings.url || '',
+    username: settings.username || '',
+    scopes: scopes
+  })).digest('hex');
+}
+
+async function previewNextcloudMirrorDelete(settings) {
+  let test = await testNextcloudSettings(settings);
+  if (test.status !== 'success') {
+    throw new Error(test.message || 'Nextcloud connection failed.');
+  }
+  assertSupportedNextcloudScopes(settings);
+  let selectedScopes = selectedNextcloudScopes(settings);
+  let preview = {
+    id: 'mirror-delete-' + Date.now() + '-' + crypto.randomBytes(4).toString('hex'),
+    createdAt: Date.now(),
+    key: mirrorDeletePreviewKey(settings),
+    scopes: selectedScopes,
+    totalExtras: 0,
+    extras: {},
+    truncated: false
+  };
+  for await (let scopeId of selectedScopes) {
+    let files = await collectNextcloudScopeFiles(scopeId);
+    let extras = await previewScopeMirrorDelete(settings, scopeId, files);
+    preview.extras[scopeId] = extras.slice(0, 500);
+    preview.totalExtras += extras.length;
+    if (extras.length > preview.extras[scopeId].length) {
+      preview.truncated = true;
+    }
+  }
+  cleanupMirrorDeletePreviews();
+  nextcloudMirrorDeletePreviews.set(preview.id, preview);
+  return preview;
+}
+
+async function applyNextcloudArchiveRetention(settings, remoteFolder, prefix) {
+  let retention = settings.retention || {};
+  if (retention.mode === 'forever') {
+    return {deleted: 0};
+  }
+  let files = await listNextcloudArchiveFiles(settings, remoteFolder, prefix);
+  let deleteList = [];
+  if (retention.mode === 'count') {
+    let keep = Math.max(1, parseInt(retention.value || 1, 10) || 1);
+    deleteList = files.slice(0, Math.max(files.length - keep, 0));
+  } else if (retention.mode === 'days') {
+    let days = Math.max(1, parseInt(retention.value || 1, 10) || 1);
+    let cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+    deleteList = files.filter(function(file) {
+      let match = file.name.match(/(\d{4}-\d{2}-\d{2})_(\d{2}-\d{2}-\d{2})/);
+      if (!match) {
+        return false;
+      }
+      let parsed = Date.parse(match[1] + 'T' + match[2].replace(/-/g, ':') + 'Z');
+      return parsed && parsed < cutoff;
+    });
+  }
+  let deleted = 0;
+  for await (let file of deleteList) {
+    let response = await nextcloudRequest(settings, 'DELETE', file.remotePath);
+    if (response.ok || response.statusCode === 404) {
+      deleted++;
+    }
+  }
+  return {deleted: deleted};
+}
+
+function assertNextcloudJobNotCanceled(job) {
+  if (job && job.cancelRequested) {
+    let label = job.kind === 'restore' ? 'restore' : 'backup';
+    let error = new Error('Nextcloud ' + label + ' was canceled.');
+    error.code = 'NEXTCLOUD_BACKUP_CANCELED';
+    throw error;
+  }
+}
+
+async function runScopeArchiveBackup(settings, scopeId, files, summary, job) {
+  assertNextcloudJobNotCanceled(job);
+  let remoteFolder = settings.scopes[scopeId].remotePath;
+  await ensureNextcloudFolder(settings, remoteFolder);
+  let prefix = scopeArchivePrefix(scopeId);
+  let archiveName = prefix + backupTimestampLabel() + '.zip';
+  assertNextcloudJobNotCanceled(job);
+  let buffer = await buildScopeArchive(files);
+  assertNextcloudJobNotCanceled(job);
+  await putNextcloudFile(settings, path.posix.join(remoteFolder, archiveName), buffer, 'application/zip');
+  assertNextcloudJobNotCanceled(job);
+  summary.archivesUploaded += 1;
+  summary.bytesUploaded += buffer.length;
+  summary.archiveFiles.push(path.posix.join(remoteFolder, archiveName));
+  summary.scopeDetails[scopeId].archivesUploaded += 1;
+  summary.scopeDetails[scopeId].bytesUploaded += buffer.length;
+  summary.scopeDetails[scopeId].archiveFiles.push(path.posix.join(remoteFolder, archiveName));
+  let retention = await applyNextcloudArchiveRetention(settings, remoteFolder, prefix);
+  assertNextcloudJobNotCanceled(job);
+  summary.retentionDeleted += retention.deleted;
+  summary.scopeDetails[scopeId].retentionDeleted += retention.deleted;
+}
+
+async function runScopeMirrorBackup(settings, scopeId, files, summary, job) {
+  let remoteFolder = settings.scopes[scopeId].remotePath;
+  await ensureNextcloudFolder(settings, remoteFolder);
+  for await (let file of files) {
+    assertNextcloudJobNotCanceled(job);
+    let content = await readBackupFileContent(file);
+    assertNextcloudJobNotCanceled(job);
+    await putNextcloudFile(settings, path.posix.join(remoteFolder, file.relPath), content, 'application/octet-stream');
+    assertNextcloudJobNotCanceled(job);
+    summary.filesUploaded += 1;
+    summary.bytesUploaded += content.length;
+    summary.scopeDetails[scopeId].filesUploaded += 1;
+    summary.scopeDetails[scopeId].bytesUploaded += content.length;
+  }
+  if (settings.mirrorDelete === true && job && job.mirrorDeletePreview && job.mirrorDeletePreview.extras) {
+    let extras = job.mirrorDeletePreview.extras[scopeId] || [];
+    for await (let extra of extras) {
+      assertNextcloudJobNotCanceled(job);
+      let response = await nextcloudRequest(settings, 'DELETE', extra.remotePath);
+      if (response.ok || response.statusCode === 404) {
+        summary.remoteExtrasDeleted += 1;
+        summary.scopeDetails[scopeId].remoteExtrasDeleted += 1;
+      }
+    }
+  }
+}
+
+async function runNextcloudBackup(settings, job) {
+  assertNextcloudJobNotCanceled(job);
+  let test = await testNextcloudSettings(settings);
+  if (test.status !== 'success') {
+    throw new Error(test.message || 'Nextcloud connection failed.');
+  }
+  assertNextcloudJobNotCanceled(job);
+  assertSupportedNextcloudScopes(settings);
+  let selectedScopes = selectedNextcloudScopes(settings);
+  let summary = {
+    mode: settings.mode,
+    scopes: selectedScopes,
+    filesConsidered: 0,
+    filesUploaded: 0,
+    archivesUploaded: 0,
+    bytesUploaded: 0,
+    retentionDeleted: 0,
+    remoteExtrasDeleted: 0,
+    mirrorDeletePreviewId: job && job.mirrorDeletePreview ? job.mirrorDeletePreview.id : '',
+    archiveFiles: [],
+    scopeDetails: {}
+  };
+  for await (let scopeId of selectedScopes) {
+    assertNextcloudJobNotCanceled(job);
+    let files = await collectNextcloudScopeFiles(scopeId);
+    assertNextcloudJobNotCanceled(job);
+    summary.filesConsidered += files.length;
+    summary.scopeDetails[scopeId] = {
+      filesConsidered: files.length,
+      filesUploaded: 0,
+      archivesUploaded: 0,
+      bytesUploaded: 0,
+      retentionDeleted: 0,
+      remoteExtrasDeleted: 0,
+      archiveFiles: []
+    };
+    if (settings.mode === 'archive' || settings.mode === 'both') {
+      await runScopeArchiveBackup(settings, scopeId, files, summary, job);
+    }
+    if (settings.mode === 'mirror' || settings.mode === 'both') {
+      await runScopeMirrorBackup(settings, scopeId, files, summary, job);
+    }
+  }
+  return summary;
+}
+
+function assertSafeNextcloudArchivePath(settings, scopeId, remotePath) {
+  let scope = settings.scopes && settings.scopes[scopeId] || {};
+  let remoteFolder = sanitizeNextcloudPath(scope.remotePath || '');
+  let clean = sanitizeNextcloudPath(remotePath || '');
+  let folderWithSlash = remoteFolder.replace(/\/+$/, '') + '/';
+  if (!remoteFolder || (clean !== remoteFolder && clean.indexOf(folderWithSlash) !== 0)) {
+    throw new Error('Selected archive is outside the configured Nextcloud folder.');
+  }
+  let archiveName = clean.split('/').filter(Boolean).pop() || '';
+  if (archiveName.indexOf(scopeArchivePrefix(scopeId)) !== 0 || !/\.zip$/i.test(archiveName)) {
+    throw new Error('Selected file does not look like a ' + scopeId + ' archive.');
+  }
+  return clean;
+}
+
+async function listNextcloudProfileArchives(settings) {
+  let test = await testNextcloudSettings(settings);
+  if (test.status !== 'success') {
+    throw new Error(test.message || 'Nextcloud connection failed.');
+  }
+  if (!settings.scopes || !settings.scopes.profiles || !settings.scopes.profiles.remotePath) {
+    throw new Error('Enter the Profiles Nextcloud destination folder before listing archives.');
+  }
+  return await listNextcloudArchiveFiles(settings, settings.scopes.profiles.remotePath, scopeArchivePrefix('profiles'));
+}
+
+async function restoreProfileArchive(settings, archivePath, job) {
+  assertNextcloudJobNotCanceled(job);
+  let cleanArchivePath = assertSafeNextcloudArchivePath(settings, 'profiles', archivePath);
+  let archiveBuffer = await getNextcloudFile(settings, cleanArchivePath);
+  assertNextcloudJobNotCanceled(job);
+  let zip = await JSZip.loadAsync(archiveBuffer);
+  let entries = Object.keys(zip.files).filter(function(name) {
+    return !zip.files[name].dir;
+  });
+  let profileRoot = path.join(home, 'profile');
+  let backupRoot = path.join(profileRoot, '.restore-backups', backupTimestampLabel());
+  let summary = {
+    mode: 'restore',
+    scopes: ['profiles'],
+    archiveFile: cleanArchivePath,
+    filesRestored: 0,
+    filesBackedUp: 0,
+    bytesRestored: 0,
+    backupFolder: backupRoot
+  };
+  for await (let entryName of entries) {
+    assertNextcloudJobNotCanceled(job);
+    if (entryName === 'settings.json' || entryName === 'activity.db' || entryName === 'scan-history.jsonl') {
+      continue;
+    }
+    let targetPath = safeProfilePath(profileRoot, entryName);
+    let backupPath = safeProfilePath(backupRoot, entryName);
+    let content = await zip.files[entryName].async('nodebuffer');
+    if (fs.existsSync(targetPath)) {
+      await ensureDir(backupPath);
+      await fsw.copyFile(targetPath, backupPath);
+      summary.filesBackedUp += 1;
+    }
+    await ensureDir(targetPath);
+    await fsw.writeFile(targetPath, content);
+    summary.filesRestored += 1;
+    summary.bytesRestored += content.length;
+  }
+  return summary;
+}
+
+function publicNextcloudJob(job) {
+  if (!job) {
+    return null;
+  }
+  return {
+    id: job.id,
+    kind: job.kind || 'backup',
+    status: job.status,
+    message: job.message || '',
+    mode: job.mode || '',
+    scopes: job.scopes || [],
+    startedAt: job.startedAt || '',
+    completedAt: job.completedAt || '',
+    requestedBy: job.requestedBy || '',
+    progress: job.progress || 0,
+    summary: job.summary || null,
+    error: job.error || ''
+  };
+}
+
+function latestNextcloudJob() {
+  let jobs = Array.from(nextcloudBackupJobs.values());
+  jobs.sort(function(a, b) {
+    return String(b.startedAt || '').localeCompare(String(a.startedAt || ''));
+  });
+  return jobs[0] || null;
+}
+
+function runningNextcloudJob() {
+  return Array.from(nextcloudBackupJobs.values()).find(function(job) {
+    return job.status === 'running' || job.status === 'queued' || job.status === 'canceling';
+  }) || null;
+}
+
+function trimNextcloudJobs() {
+  let jobs = Array.from(nextcloudBackupJobs.values());
+  if (jobs.length <= 20) {
+    return;
+  }
+  jobs.sort(function(a, b) {
+    return String(b.startedAt || '').localeCompare(String(a.startedAt || ''));
+  });
+  jobs.slice(20).forEach(function(job) {
+    nextcloudBackupJobs.delete(job.id);
+  });
+}
+
+function backupRequestContext(req) {
+  return {
+    headers: Object.assign({}, req.headers || {}),
+    socket: {
+      remoteAddress: req && req.socket ? req.socket.remoteAddress : ''
+    }
+  };
+}
+
+function schedulerRequestContext() {
+  return {
+    headers: {
+      'user-agent': 'EmulatorJS Nextcloud Scheduler'
+    },
+    socket: {
+      remoteAddress: '127.0.0.1'
+    }
+  };
+}
+
+function backupActivityPayload(job, action, status, extra) {
+  let kind = job.kind === 'restore' ? 'restore' : 'backup';
+  return Object.assign({
+    title: 'EmulatorJS Nextcloud ' + kind + ' ' + status,
+    event: 'nextcloud_' + kind + '_' + status,
+    action: action,
+    status: status,
+    username: job.requestedBy || '',
+    role: 'admin',
+    source: 'filebrowser',
+    nextcloudJob: {
+      id: job.id,
+      kind: kind,
+      mode: job.mode || '',
+      scopes: job.scopes || [],
+      startedAt: job.startedAt || '',
+      completedAt: job.completedAt || '',
+      message: job.message || ''
+    },
+    backup: {
+      id: job.id,
+      kind: kind,
+      mode: job.mode || '',
+      scopes: job.scopes || [],
+      startedAt: job.startedAt || '',
+      completedAt: job.completedAt || '',
+      message: job.message || ''
+    }
+  }, extra || {});
+}
+
+async function emitBackupActivity(job, action, status, extra) {
+  try {
+    let settings = await readSettings();
+    await emitActivityWebhook(settings, job.requestContext || {headers: {}, socket: {}}, backupActivityPayload(job, action, status, extra));
+  } catch(e) {
+    console.log('Unable to emit Nextcloud backup activity', e);
+  }
+}
+
+function updateNextcloudJob(job, updates) {
+  Object.assign(job, updates || {});
+  nextcloudBackupJobs.set(job.id, job);
+  return job;
+}
+
+async function persistNextcloudJobStatus(job) {
+  let settings = await readSettings();
+  settings.nextcloud = normalizeNextcloudSettings(settings.nextcloud || {}, settings.nextcloud);
+  settings.nextcloud.lastStatus = {
+    kind: job.kind || 'backup',
+    status: job.status,
+    message: job.message || '',
+    startedAt: job.startedAt || '',
+    completedAt: job.completedAt || '',
+    jobId: job.id,
+    summary: job.summary || null
+  };
+  await writeSettings(settings);
+}
+
+async function runNextcloudBackupJob(job, settings) {
+  updateNextcloudJob(job, {
+    status: 'running',
+    message: 'Nextcloud backup is running.',
+    progress: 5
+  });
+  await persistNextcloudJobStatus(job);
+  await emitBackupActivity(job, 'backup_start', 'started');
+  try {
+    let summary = await runNextcloudBackup(settings, job);
+    updateNextcloudJob(job, {
+      status: 'success',
+      completedAt: new Date().toISOString(),
+      progress: 100,
+      summary: summary,
+      message: 'Backup completed. Uploaded ' + summary.filesUploaded + ' file(s), ' + summary.archivesUploaded + ' archive(s), deleted ' + summary.remoteExtrasDeleted + ' remote extra file(s), ' + summary.bytesUploaded + ' byte(s).'
+    });
+    await persistNextcloudJobStatus(job);
+    await emitBackupActivity(job, 'backup_complete', 'succeeded', {backup: Object.assign(backupActivityPayload(job, 'backup_complete', 'succeeded').backup, {summary: summary})});
+  } catch(e) {
+    let canceled = e && e.code === 'NEXTCLOUD_BACKUP_CANCELED';
+    updateNextcloudJob(job, {
+      status: canceled ? 'canceled' : 'error',
+      completedAt: new Date().toISOString(),
+      progress: 100,
+      error: canceled ? '' : e && e.message ? e.message : 'Nextcloud backup failed.',
+      message: canceled ? 'Nextcloud backup canceled.' : e && e.message ? e.message : 'Nextcloud backup failed.'
+    });
+    await persistNextcloudJobStatus(job);
+    if (canceled) {
+      await emitBackupActivity(job, 'backup_canceled', 'canceled');
+    } else {
+      await emitBackupActivity(job, 'backup_failed', 'failed', {
+        reason: job.error,
+        backup: Object.assign(backupActivityPayload(job, 'backup_failed', 'failed').backup, {error: job.error})
+      });
+    }
+  } finally {
+    trimNextcloudJobs();
+  }
+}
+
+async function runNextcloudRestoreJob(job, settings, archivePath) {
+  updateNextcloudJob(job, {
+    status: 'running',
+    message: 'Nextcloud restore is running.',
+    progress: 10
+  });
+  await persistNextcloudJobStatus(job);
+  await emitBackupActivity(job, 'restore_start', 'started');
+  try {
+    let summary = await restoreProfileArchive(settings, archivePath, job);
+    updateNextcloudJob(job, {
+      status: 'success',
+      completedAt: new Date().toISOString(),
+      progress: 100,
+      summary: summary,
+      message: 'Restore completed. Restored ' + summary.filesRestored + ' profile file(s) from ' + path.posix.basename(summary.archiveFile) + '.'
+    });
+    await persistNextcloudJobStatus(job);
+    await emitBackupActivity(job, 'restore_complete', 'succeeded', {backup: Object.assign(backupActivityPayload(job, 'restore_complete', 'succeeded').backup, {summary: summary}), restore: summary});
+  } catch(e) {
+    let canceled = e && e.code === 'NEXTCLOUD_BACKUP_CANCELED';
+    updateNextcloudJob(job, {
+      status: canceled ? 'canceled' : 'error',
+      completedAt: new Date().toISOString(),
+      progress: 100,
+      error: canceled ? '' : e && e.message ? e.message : 'Nextcloud restore failed.',
+      message: canceled ? 'Nextcloud restore canceled.' : e && e.message ? e.message : 'Nextcloud restore failed.'
+    });
+    await persistNextcloudJobStatus(job);
+    if (canceled) {
+      await emitBackupActivity(job, 'restore_canceled', 'canceled');
+    } else {
+      await emitBackupActivity(job, 'restore_failed', 'failed', {
+        reason: job.error,
+        backup: Object.assign(backupActivityPayload(job, 'restore_failed', 'failed').backup, {error: job.error})
+      });
+    }
+  } finally {
+    trimNextcloudJobs();
+  }
+}
+
+function startNextcloudBackupJob(req, profileRecord, settings) {
+  let existing = runningNextcloudJob();
+  if (existing) {
+    return {existing: true, job: existing};
+  }
+  assertSupportedNextcloudScopes(settings);
+  cleanupMirrorDeletePreviews();
+  let mirrorDeletePreview = null;
+  if (settings.mirrorDelete === true) {
+    mirrorDeletePreview = nextcloudMirrorDeletePreviews.get(String(req.body.mirrorDeletePreviewId || ''));
+    if (!mirrorDeletePreview || mirrorDeletePreview.key !== mirrorDeletePreviewKey(settings)) {
+      throw new Error('Preview mirror deletes before running a backup with mirror delete enabled.');
+    }
+  }
+  let job = {
+    id: 'nextcloud-' + Date.now() + '-' + nextcloudBackupSeq++,
+    kind: 'backup',
+    status: 'queued',
+    message: 'Nextcloud backup queued.',
+    mode: settings.mode,
+    scopes: selectedNextcloudScopes(settings),
+    progress: 0,
+    startedAt: new Date().toISOString(),
+    completedAt: '',
+    requestedBy: profileRecord && profileRecord.username || '',
+    summary: null,
+    error: '',
+    cancelRequested: false,
+    mirrorDeletePreview: mirrorDeletePreview,
+    requestContext: backupRequestContext(req)
+  };
+  nextcloudBackupJobs.set(job.id, job);
+  setImmediate(function() {
+    runNextcloudBackupJob(job, settings).catch(function(e) {
+      console.log('Nextcloud backup job failed outside handler', e);
+    });
+  });
+  return {existing: false, job: job};
+}
+
+function startNextcloudRestoreJob(req, profileRecord, settings, archivePath) {
+  let existing = runningNextcloudJob();
+  if (existing) {
+    return {existing: true, job: existing};
+  }
+  assertSafeNextcloudArchivePath(settings, 'profiles', archivePath);
+  let job = {
+    id: 'nextcloud-' + Date.now() + '-' + nextcloudBackupSeq++,
+    kind: 'restore',
+    status: 'queued',
+    message: 'Nextcloud restore queued.',
+    mode: 'restore',
+    scopes: ['profiles'],
+    progress: 0,
+    startedAt: new Date().toISOString(),
+    completedAt: '',
+    requestedBy: profileRecord && profileRecord.username || '',
+    summary: null,
+    error: '',
+    cancelRequested: false,
+    requestContext: backupRequestContext(req)
+  };
+  nextcloudBackupJobs.set(job.id, job);
+  setImmediate(function() {
+    runNextcloudRestoreJob(job, settings, archivePath).catch(function(e) {
+      console.log('Nextcloud restore job failed outside handler', e);
+    });
+  });
+  return {existing: false, job: job};
+}
+
+async function checkNextcloudSchedule() {
+  try {
+    if (runningNextcloudJob()) {
+      return;
+    }
+    let settings = await readSettings();
+    settings.nextcloud = normalizeNextcloudSettings(settings.nextcloud || {}, settings.nextcloud);
+    let schedule = settings.nextcloud.schedule || {};
+    let due = scheduleDueInfo(schedule, new Date());
+    if (!due.due) {
+      return;
+    }
+    settings.nextcloud.schedule.lastRunKey = due.key;
+    await writeSettings(settings);
+    try {
+      startNextcloudBackupJob(schedulerRequestContext(), {username: 'scheduler'}, settings.nextcloud);
+    } catch(e) {
+      settings = await readSettings();
+      settings.nextcloud = normalizeNextcloudSettings(settings.nextcloud || {}, settings.nextcloud);
+      settings.nextcloud.lastStatus = {
+        status: 'error',
+        message: e && e.message ? e.message : 'Scheduled Nextcloud backup failed to start.',
+        completedAt: new Date().toISOString()
+      };
+      await writeSettings(settings);
+    }
+  } catch(e) {
+    console.log('Nextcloud schedule check failed', e);
+  }
+}
+
+setInterval(checkNextcloudSchedule, 60 * 1000);
+setTimeout(checkNextcloudSchedule, 15 * 1000);
 
 function hashProfile(user, pass) {
   return crypto.createHash('sha256').update(user + pass).digest('hex');
@@ -1628,6 +2685,115 @@ app.post('/*', async function(req, res) {
           let testSettings = normalizeNextcloudSettings(req.body.nextcloud || {}, settings.nextcloud);
           let result = await testNextcloudSettings(testSettings);
           res.json(result.status === 'success' ? result : {status: 'error', message: result.message || 'Nextcloud connection failed.'});
+        } else if (type == 'listnextcloudarchives') {
+          if (currentRole !== 'admin') {
+            res.json(error);
+            return;
+          }
+          let settings = await readSettings();
+          let testSettings = normalizeNextcloudSettings(req.body.nextcloud || {}, settings.nextcloud);
+          try {
+            let archives = await listNextcloudProfileArchives(testSettings);
+            res.json({status: 'success', archives: archives});
+          } catch(e) {
+            res.json({status: 'error', message: e && e.message ? e.message : 'Unable to list Nextcloud archives.'});
+          }
+        } else if (type == 'previewnextcloudmirrordelete') {
+          if (currentRole !== 'admin') {
+            res.json(error);
+            return;
+          }
+          let settings = await readSettings();
+          let testSettings = normalizeNextcloudSettings(req.body.nextcloud || {}, settings.nextcloud);
+          try {
+            let preview = await previewNextcloudMirrorDelete(testSettings);
+            res.json({status: 'success', preview: preview});
+          } catch(e) {
+            res.json({status: 'error', message: e && e.message ? e.message : 'Unable to preview mirror deletes.'});
+          }
+        } else if (type == 'runnextcloudbackup') {
+          if (currentRole !== 'admin') {
+            res.json(error);
+            return;
+          }
+          let settings = await readSettings();
+          settings.nextcloud = normalizeNextcloudSettings(req.body.nextcloud || {}, settings.nextcloud);
+          await writeSettings(settings);
+          try {
+            let started = startNextcloudBackupJob(req, profile[hash], settings.nextcloud);
+            res.json({
+              status: 'success',
+              message: started.existing ? 'A Nextcloud backup is already running.' : 'Nextcloud backup started.',
+              job: publicNextcloudJob(started.job),
+              nextcloud: publicNextcloudSettings(settings)
+            });
+          } catch(e) {
+            settings = await readSettings();
+            settings.nextcloud = normalizeNextcloudSettings(settings.nextcloud || {}, settings.nextcloud);
+            settings.nextcloud.lastStatus = {
+              status: 'error',
+              message: e && e.message ? e.message : 'Nextcloud backup failed.',
+              completedAt: new Date().toISOString()
+            };
+            await writeSettings(settings);
+            res.json({status: 'error', message: settings.nextcloud.lastStatus.message, nextcloud: publicNextcloudSettings(settings)});
+          }
+        } else if (type == 'restorenextcloudarchive') {
+          if (currentRole !== 'admin') {
+            res.json(error);
+            return;
+          }
+          let settings = await readSettings();
+          settings.nextcloud = normalizeNextcloudSettings(req.body.nextcloud || {}, settings.nextcloud);
+          await writeSettings(settings);
+          try {
+            let archivePath = String(req.body.archivePath || '');
+            let started = startNextcloudRestoreJob(req, profile[hash], settings.nextcloud, archivePath);
+            res.json({
+              status: 'success',
+              message: started.existing ? 'A Nextcloud job is already running.' : 'Nextcloud restore started.',
+              job: publicNextcloudJob(started.job),
+              nextcloud: publicNextcloudSettings(settings)
+            });
+          } catch(e) {
+            settings = await readSettings();
+            settings.nextcloud = normalizeNextcloudSettings(settings.nextcloud || {}, settings.nextcloud);
+            settings.nextcloud.lastStatus = {
+              kind: 'restore',
+              status: 'error',
+              message: e && e.message ? e.message : 'Nextcloud restore failed.',
+              completedAt: new Date().toISOString()
+            };
+            await writeSettings(settings);
+            res.json({status: 'error', message: settings.nextcloud.lastStatus.message, nextcloud: publicNextcloudSettings(settings)});
+          }
+        } else if (type == 'getnextcloudbackupstatus') {
+          if (currentRole !== 'admin') {
+            res.json(error);
+            return;
+          }
+          let job = req.body.jobId ? nextcloudBackupJobs.get(req.body.jobId) : runningNextcloudJob() || latestNextcloudJob();
+          let settings = await readSettings();
+          res.json({status: 'success', job: publicNextcloudJob(job), nextcloud: publicNextcloudSettings(settings)});
+        } else if (type == 'cancelnextcloudbackup') {
+          if (currentRole !== 'admin') {
+            res.json(error);
+            return;
+          }
+          let job = req.body.jobId ? nextcloudBackupJobs.get(req.body.jobId) : runningNextcloudJob();
+          if (!job || (job.status !== 'running' && job.status !== 'queued' && job.status !== 'canceling')) {
+            res.json({status: 'error', message: 'No running Nextcloud job was found.'});
+            return;
+          }
+          let label = job.kind === 'restore' ? 'restore' : 'backup';
+          job.cancelRequested = true;
+          updateNextcloudJob(job, {
+            status: 'canceling',
+            message: 'Stop requested. Nextcloud ' + label + ' will stop after the current file finishes.',
+            progress: Math.max(job.progress || 0, 5)
+          });
+          await persistNextcloudJobStatus(job);
+          res.json({status: 'success', message: job.message, job: publicNextcloudJob(job)});
         } else if (type == 'listprofilesaves') {
           let profilePath = profilePathForUser(profile[hash].username);
           let records = await listSaveVersionRecords(profilePath);

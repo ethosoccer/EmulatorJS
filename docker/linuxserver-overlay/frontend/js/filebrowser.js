@@ -9,6 +9,9 @@ var postSettings = {method:'POST',headers:{Accept:'application/json','Content-Ty
 var favoritesProfileFile = '.emulatorjs-favorites.json';
 var favoritesSyncProfileFile = '.emulatorjs-favorites-sync.json';
 var favoritesSyncStorageKey = 'ejsFavoritesSync';
+var nextcloudJobPollTimer = null;
+var activeNextcloudJobId = null;
+var activeMirrorDeletePreviewId = '';
 var userOverrideHelp = {
   selectorStyle: 'Use popup game/save selectors instead of the controller-friendly full menu selector',
   launchErrorDebug: 'Show in-game launch error overlay for debugging'
@@ -53,7 +56,7 @@ var nextcloudScopes = [
   {
     id: 'fullData',
     label: 'Full /data folder',
-    description: 'Everything in the server data folder. This may be very large.',
+    description: 'Everything in the server data folder except the live .ipfs runtime repo. This may be very large.',
     placeholder: '/EmulatorJS/full-data'
   }
 ];
@@ -233,7 +236,9 @@ function showFilebrowserTab(tab) {
   $('.tab-panel').addClass('hidden').removeClass('active');
   $('#tab-' + tab).removeClass('hidden').addClass('active');
   if (tab === 'users') {
-    loadUsers();
+    loadUserManagementTab();
+  }
+  if (tab === 'webhooks') {
     loadAdminSettings();
   }
   if (tab === 'nextcloud') {
@@ -296,6 +301,101 @@ function nextcloudStatus(message, isError) {
   $('#nextcloudStatus').text(message || '').toggleClass('is-error', !!isError);
 }
 
+function setNextcloudProgress(percent, visible) {
+  let clean = Math.max(0, Math.min(Number(percent || 0), 100));
+  $('#nextcloudJobProgress').toggleClass('hidden', visible === false).attr('aria-hidden', visible === false ? 'true' : 'false');
+  $('#nextcloudJobProgressBar').css('width', clean + '%');
+}
+
+function describeNextcloudJob(job) {
+  if (!job) {
+    setNextcloudProgress(0, false);
+    return '';
+  }
+  let summary = job.summary || {};
+  let jobLabel = job.kind === 'restore' ? 'Restore' : 'Backup';
+  let bits = [];
+  bits.push(jobLabel + ' ' + job.status + ': ' + (job.message || 'No message.'));
+  if (job.mode) {
+    bits.push('Mode: ' + job.mode + '.');
+  }
+  if (job.scopes && job.scopes.length) {
+    bits.push('Scopes: ' + job.scopes.join(', ') + '.');
+  }
+  if (job.startedAt) {
+    bits.push('Started: ' + new Date(job.startedAt).toLocaleString() + '.');
+  }
+  if (job.completedAt) {
+    bits.push('Finished: ' + new Date(job.completedAt).toLocaleString() + '.');
+  }
+  if (summary.filesUploaded || summary.archivesUploaded || summary.bytesUploaded) {
+    bits.push('Uploaded ' + (summary.filesUploaded || 0) + ' file(s), ' + (summary.archivesUploaded || 0) + ' archive(s), ' + (summary.bytesUploaded || 0) + ' byte(s).');
+  }
+  if (summary.remoteExtrasDeleted) {
+    bits.push('Deleted ' + summary.remoteExtrasDeleted + ' remote extra file(s).');
+  }
+  if (summary.filesRestored || summary.filesBackedUp || summary.bytesRestored) {
+    bits.push('Restored ' + (summary.filesRestored || 0) + ' file(s), backed up ' + (summary.filesBackedUp || 0) + ' overwritten file(s), ' + (summary.bytesRestored || 0) + ' byte(s).');
+  }
+  setNextcloudProgress(job.progress || (job.status === 'success' || job.status === 'error' ? 100 : 0), true);
+  return bits.join(' ');
+}
+
+function updateNextcloudJobStatus(job) {
+  if (!job) {
+    return;
+  }
+  activeNextcloudJobId = job.id || activeNextcloudJobId;
+  nextcloudStatus(describeNextcloudJob(job), job.status === 'error');
+  let active = job.status === 'running' || job.status === 'queued' || job.status === 'canceling';
+  $('#nextcloudStopBackup').toggleClass('hidden', !active).prop('disabled', job.status === 'canceling');
+  if (active) {
+    startNextcloudJobPolling(job.id);
+  } else {
+    stopNextcloudJobPolling();
+  }
+}
+
+function stopNextcloudJobPolling() {
+  if (nextcloudJobPollTimer) {
+    clearTimeout(nextcloudJobPollTimer);
+    nextcloudJobPollTimer = null;
+  }
+}
+
+function startNextcloudJobPolling(jobId) {
+  activeNextcloudJobId = jobId || activeNextcloudJobId;
+  if (nextcloudJobPollTimer) {
+    return;
+  }
+  async function poll() {
+    nextcloudJobPollTimer = null;
+    await loadNextcloudBackupStatus(activeNextcloudJobId);
+    if (activeNextcloudJobId) {
+      nextcloudJobPollTimer = setTimeout(poll, 2500);
+    }
+  }
+  nextcloudJobPollTimer = setTimeout(poll, 1000);
+}
+
+async function loadNextcloudBackupStatus(jobId) {
+  if (localStorage.getItem('role') !== 'admin') {
+    return;
+  }
+  let res = await fetch(endPoint, clonePostBody(adminProfileBody('getnextcloudbackupstatus', {jobId: jobId || ''})));
+  let json = await res.json();
+  if (json.status !== 'success') {
+    return;
+  }
+  if (json.job) {
+    updateNextcloudJobStatus(json.job);
+    if (json.job.status !== 'running' && json.job.status !== 'queued' && json.job.status !== 'canceling') {
+      activeNextcloudJobId = null;
+      $('#nextcloudStopBackup').addClass('hidden').prop('disabled', false);
+    }
+  }
+}
+
 function nextcloudPayload(includePassword) {
   let scopes = {};
   nextcloudScopes.forEach(function(scope) {
@@ -330,6 +430,11 @@ function nextcloudPayload(includePassword) {
   return payload;
 }
 
+function resetMirrorDeletePreview() {
+  activeMirrorDeletePreviewId = '';
+  $('#nextcloudMirrorDeletePreview').addClass('hidden').attr('aria-hidden', 'true').empty();
+}
+
 function applyNextcloudSettings(settings) {
   settings = settings || {};
   renderNextcloudScopes();
@@ -351,13 +456,18 @@ function applyNextcloudSettings(settings) {
     $('#nextcloudScope-' + scope.id).prop('checked', scopes[scope.id] && scopes[scope.id].enabled === true);
     $('#nextcloudPath-' + scope.id).val(scopes[scope.id] && scopes[scope.id].remotePath || '');
   });
+  resetMirrorDeletePreview();
   updateNextcloudScheduleVisibility();
   let status = settings.lastStatus || {};
   let statusText = status.message || 'Nextcloud settings loaded. No backup jobs have run from this UI yet.';
   if (settings.schedule && settings.schedule.type && settings.schedule.type !== 'manual') {
     statusText += ' Schedule timezone: ' + (settings.schedule.timeZone || browserTimeZone() || 'server local time') + '.';
   }
+  if (settings.nextRun && settings.nextRun.label) {
+    statusText += ' Next scheduled run: ' + settings.nextRun.label + '.';
+  }
   nextcloudStatus(statusText, status.status === 'error');
+  setNextcloudProgress(status.status === 'running' ? 15 : status.status === 'success' || status.status === 'error' ? 100 : 0, status.status === 'running' || status.status === 'success' || status.status === 'error');
 }
 
 async function loadNextcloudSettings() {
@@ -373,6 +483,7 @@ async function loadNextcloudSettings() {
     return;
   }
   applyNextcloudSettings(json.nextcloud || {});
+  loadNextcloudBackupStatus();
 }
 
 async function saveNextcloudSettings() {
@@ -398,6 +509,192 @@ async function testNextcloudConnection() {
     return;
   }
   nextcloudStatus(json.message || 'Nextcloud WebDAV connection succeeded.');
+}
+
+async function runNextcloudBackup() {
+  let payload = nextcloudPayload(true);
+  let selectedScopes = Object.keys(payload.scopes || {}).filter(function(scopeId) {
+    return payload.scopes[scopeId] && payload.scopes[scopeId].enabled === true;
+  });
+  if (!selectedScopes.length) {
+    nextcloudStatus('Select at least one backup scope before running a backup.', true);
+    return;
+  }
+  let missingPathScope = selectedScopes.find(function(scopeId) {
+    return !payload.scopes[scopeId].remotePath;
+  });
+  if (missingPathScope) {
+    nextcloudStatus('Enter a Nextcloud destination folder for each selected scope.', true);
+    return;
+  }
+  if (payload.mirrorDelete === true) {
+    if (payload.mode !== 'mirror' && payload.mode !== 'both') {
+      nextcloudStatus('Mirror delete only applies when Backup mode is Mirror sync or Both.', true);
+      return;
+    }
+    if (!activeMirrorDeletePreviewId) {
+      nextcloudStatus('Preview mirror deletes before running a backup with mirror delete enabled.', true);
+      return;
+    }
+    if (!confirm('Run backup and delete the remote extras shown in the latest mirror-delete preview?')) {
+      return;
+    }
+  }
+  nextcloudStatus('Starting Nextcloud backup job on the server...');
+  setNextcloudProgress(5, true);
+  let res = await fetch(endPoint, clonePostBody(adminProfileBody('runnextcloudbackup', {nextcloud: payload, mirrorDeletePreviewId: activeMirrorDeletePreviewId})));
+  let json = await res.json();
+  if (json.nextcloud) {
+    applyNextcloudSettings(json.nextcloud);
+  }
+  if (json.status !== 'success') {
+    nextcloudStatus(json.message || 'Nextcloud backup failed.', true);
+    return;
+  }
+  if (json.job) {
+    updateNextcloudJobStatus(json.job);
+    startNextcloudJobPolling(json.job.id);
+    return;
+  }
+  nextcloudStatus(json.message || 'Nextcloud backup started.');
+}
+
+function renderMirrorDeletePreview(preview) {
+  let panel = $('#nextcloudMirrorDeletePreview');
+  panel.empty().removeClass('hidden').attr('aria-hidden', 'false');
+  let total = preview && preview.totalExtras || 0;
+  panel.append($('<h3>').text('Mirror Delete Preview'));
+  panel.append($('<p>').text(total + ' remote extra file(s) would be deleted after the mirror upload completes. Archive zip files are protected.'));
+  if (preview && preview.truncated) {
+    panel.append($('<p>').text('Preview list was truncated for display. The backup job will only delete files included in this confirmed preview.'));
+  }
+  let list = $('<ul>');
+  Object.keys(preview && preview.extras || {}).forEach(function(scopeId) {
+    (preview.extras[scopeId] || []).forEach(function(file) {
+      list.append($('<li>').text(scopeId + ': ' + file.relPath));
+    });
+  });
+  if (!list.children().length) {
+    list.append($('<li>').text('No remote extras found.'));
+  }
+  panel.append(list);
+}
+
+async function previewNextcloudMirrorDelete() {
+  let payload = nextcloudPayload(true);
+  let selectedScopes = Object.keys(payload.scopes || {}).filter(function(scopeId) {
+    return payload.scopes[scopeId] && payload.scopes[scopeId].enabled === true;
+  });
+  if (payload.mode !== 'mirror' && payload.mode !== 'both') {
+    nextcloudStatus('Switch Backup mode to Mirror sync or Both before previewing mirror deletes.', true);
+    return;
+  }
+  if (!selectedScopes.length) {
+    nextcloudStatus('Select at least one backup scope before previewing mirror deletes.', true);
+    return;
+  }
+  let missingPathScope = selectedScopes.find(function(scopeId) {
+    return !payload.scopes[scopeId].remotePath;
+  });
+  if (missingPathScope) {
+    nextcloudStatus('Enter a Nextcloud destination folder for each selected scope.', true);
+    return;
+  }
+  nextcloudStatus('Previewing remote files that mirror delete would remove...');
+  let res = await fetch(endPoint, clonePostBody(adminProfileBody('previewnextcloudmirrordelete', {nextcloud: payload})));
+  let json = await res.json();
+  if (json.status !== 'success') {
+    resetMirrorDeletePreview();
+    nextcloudStatus(json.message || 'Unable to preview mirror deletes.', true);
+    return;
+  }
+  activeMirrorDeletePreviewId = json.preview && json.preview.id || '';
+  renderMirrorDeletePreview(json.preview || {});
+  nextcloudStatus('Mirror delete preview ready. Review it before running backup.');
+}
+
+async function cancelNextcloudBackup() {
+  if (!activeNextcloudJobId) {
+    nextcloudStatus('No running Nextcloud job was found.', true);
+    return;
+  }
+  if (!confirm('Stop the running Nextcloud job? It will stop after the current file finishes.')) {
+    return;
+  }
+  $('#nextcloudStopBackup').prop('disabled', true);
+  nextcloudStatus('Requesting backup stop...');
+  let res = await fetch(endPoint, clonePostBody(adminProfileBody('cancelnextcloudbackup', {jobId: activeNextcloudJobId})));
+  let json = await res.json();
+  if (json.status !== 'success') {
+    $('#nextcloudStopBackup').prop('disabled', false);
+    nextcloudStatus(json.message || 'Unable to stop backup.', true);
+    return;
+  }
+  if (json.job) {
+    updateNextcloudJobStatus(json.job);
+  } else {
+    nextcloudStatus(json.message || 'Stop requested.');
+  }
+}
+
+function populateNextcloudArchives(archives) {
+  let select = $('#nextcloudRestoreArchive');
+  select.empty();
+  if (!archives || !archives.length) {
+    select.append($('<option>').attr('value', '').text('No profile archives found'));
+    return;
+  }
+  archives.slice().reverse().forEach(function(archive) {
+    select.append($('<option>').attr('value', archive.remotePath).text(archive.name));
+  });
+}
+
+async function listNextcloudArchives() {
+  let payload = nextcloudPayload(true);
+  let profilesScope = payload.scopes && payload.scopes.profiles;
+  if (!profilesScope || !profilesScope.remotePath) {
+    nextcloudStatus('Enter the Profiles Nextcloud destination folder before listing archives.', true);
+    return;
+  }
+  nextcloudStatus('Listing profile archives from Nextcloud...');
+  let res = await fetch(endPoint, clonePostBody(adminProfileBody('listnextcloudarchives', {nextcloud: payload, scope: 'profiles'})));
+  let json = await res.json();
+  if (json.status !== 'success') {
+    nextcloudStatus(json.message || 'Unable to list Nextcloud archives.', true);
+    return;
+  }
+  populateNextcloudArchives(json.archives || []);
+  nextcloudStatus((json.archives || []).length + ' profile archive(s) found.');
+}
+
+async function restoreNextcloudArchive() {
+  let payload = nextcloudPayload(true);
+  let archivePath = String($('#nextcloudRestoreArchive').val() || '');
+  if (!archivePath) {
+    nextcloudStatus('Select a profile archive to restore.', true);
+    return;
+  }
+  let archiveName = $('#nextcloudRestoreArchive option:selected').text() || archivePath;
+  if (!confirm('Restore profiles from ' + archiveName + '? Matching local files will be overwritten, overwritten files will be backed up locally first, and extra local files will be kept.')) {
+    return;
+  }
+  nextcloudStatus('Starting Nextcloud restore job on the server...');
+  setNextcloudProgress(10, true);
+  let res = await fetch(endPoint, clonePostBody(adminProfileBody('restorenextcloudarchive', {nextcloud: payload, scope: 'profiles', archivePath: archivePath})));
+  let json = await res.json();
+  if (json.nextcloud) {
+    applyNextcloudSettings(json.nextcloud);
+  }
+  if (json.status !== 'success') {
+    nextcloudStatus(json.message || 'Nextcloud restore failed.', true);
+    return;
+  }
+  if (json.job) {
+    updateNextcloudJobStatus(json.job);
+    startNextcloudJobPolling(json.job.id);
+    return;
+  }
+  nextcloudStatus(json.message || 'Nextcloud restore started.');
 }
 
 // Render file list
@@ -1005,6 +1302,11 @@ async function loadUsers() {
   $('#usersList').append(table);
 }
 
+function loadUserManagementTab() {
+  loadAdminSettings();
+  loadUsers();
+}
+
 async function saveUserSettings(target, payload) {
   let roleSettings = postSettings;
   roleSettings.body = JSON.stringify(adminProfileBody('setrole', {target: target, role: payload.role}));
@@ -1061,24 +1363,19 @@ function showUserManagement() {
   if (localStorage.getItem('role') !== 'admin') {
     return;
   }
-  $('#userManagement').removeClass('hidden');
-  $('body').addClass('modal-open');
+  showFilebrowserTab('users');
   loadUsers();
-  loadAdminSettings();
   window.setTimeout(function() {
     $('#newUser').trigger('focus');
   }, 50);
 }
 
 function closeUserManagement() {
-  $('#userManagement').addClass('hidden');
   $('body').removeClass('modal-open');
 }
 
 function handleUserManagementBackdrop(event) {
-  if (event.target && event.target.id === 'userManagement') {
-    closeUserManagement();
-  }
+  return event;
 }
 
 async function loadAdminSettings() {
@@ -1317,9 +1614,4 @@ async function setupMounts() {
 window.onload = function() {
   updateThemeToggle();
   loadProfile();
-  window.addEventListener('keydown', function(event) {
-    if (event.key === 'Escape' && !$('#userManagement').hasClass('hidden')) {
-      closeUserManagement();
-    }
-  });
 }

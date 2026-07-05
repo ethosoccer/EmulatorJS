@@ -237,6 +237,20 @@ body.modal-open {
   color: var(--muted);
 }
 
+.subsection-heading {
+  margin: 20px 0 10px;
+}
+
+.subsection-heading h2 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.subsection-heading p {
+  margin: 4px 0 0;
+  color: var(--muted);
+}
+
 .settings-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(220px, 1fr));
@@ -245,6 +259,7 @@ body.modal-open {
 }
 
 .settings-grid label,
+.restore-grid label,
 .scope-row {
   display: grid;
   gap: 6px;
@@ -252,6 +267,7 @@ body.modal-open {
 }
 
 .settings-grid label > span,
+.restore-grid label > span,
 .scope-toggle {
   font-weight: 800;
 }
@@ -314,6 +330,56 @@ body.modal-open {
   color: var(--danger);
 }
 
+.backup-progress {
+  height: 10px;
+  margin: -4px 0 14px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel-soft);
+}
+
+.backup-progress-bar {
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 180ms ease;
+}
+
+.restore-panel {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+.mirror-delete-preview {
+  margin: 14px 0;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--danger) 50%, var(--line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--danger) 8%, var(--panel-soft));
+}
+
+.mirror-delete-preview h3 {
+  margin: 0 0 8px;
+  color: var(--danger);
+}
+
+.mirror-delete-preview ul {
+  max-height: 180px;
+  overflow: auto;
+  margin: 8px 0 0;
+  padding-left: 20px;
+}
+
+.restore-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, .8fr) minmax(260px, 1.2fr);
+  gap: 12px;
+  margin: 14px 0;
+}
+
 input,
 select {
   min-height: 36px;
@@ -343,6 +409,16 @@ button {
 button:hover {
   background: var(--accent-soft);
   border-color: var(--accent);
+}
+
+.danger-button {
+  border-color: color-mix(in srgb, var(--danger) 60%, var(--line-strong));
+  color: var(--danger);
+}
+
+.danger-button:hover {
+  background: color-mix(in srgb, var(--danger) 14%, var(--panel));
+  border-color: var(--danger);
 }
 
 #theme-toggle {

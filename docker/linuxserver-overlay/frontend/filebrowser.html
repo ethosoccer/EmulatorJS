@@ -9,13 +9,13 @@
         document.documentElement.setAttribute('data-theme', savedTheme || (prefersDark ? 'dark' : 'light'));
       }());
     </script>
-    <link rel="stylesheet" href="css/filebrowser.css?v=20260705-nextcloud-phase1">
+    <link rel="stylesheet" href="css/filebrowser.css?v=20260705-user-settings-tab">
     <link rel="stylesheet" href="css/vendor/jquery.modal.min.css">
     <script type="text/javascript" src="js/vendor/jquery.min.js"></script>
     <script type="text/javascript" src="js/vendor/jquery.modal.min.js"></script>
     <script type="text/javascript" src="js/vendor/browserfs.min.js"></script>
     <script type="text/javascript" src="js/vendor/jszip.min.js"></script>
-    <script type="text/javascript" src="js/filebrowser.js?v=20260705-nextcloud-phase1"></script>
+    <script type="text/javascript" src="js/filebrowser.js?v=20260705-user-settings-tab"></script>
   </head>
   <body>
   <div id="popup" class="modal">
@@ -80,7 +80,8 @@
   <nav class="admin-tabs" aria-label="File browser sections">
     <button class="admin-tab active" type="button" data-tab="files" onclick="showFilebrowserTab('files')" title="Browse and manage files in the current file browser storage">Files</button>
     <button class="admin-tab" type="button" data-tab="profiles" onclick="showFilebrowserTab('profiles')" title="Push, pull, and restore browser profile data">Profiles</button>
-    <button class="admin-tab" type="button" data-tab="users" onclick="showFilebrowserTab('users')" title="Open user management and global browser settings">Users</button>
+    <button class="admin-tab" type="button" data-tab="users" onclick="showFilebrowserTab('users')" title="Create users, update roles, and manage per-user overrides">Users</button>
+    <button class="admin-tab" type="button" data-tab="webhooks" onclick="showFilebrowserTab('webhooks')" title="Configure webhook notifications and browser-wide settings">Webhooks</button>
     <button class="admin-tab" type="button" data-tab="nextcloud" onclick="showFilebrowserTab('nextcloud')" title="Configure manual and scheduled Nextcloud backups">Nextcloud Backup</button>
   </nav>
   <section id="tab-files" class="tab-panel active">
@@ -108,9 +109,67 @@
   </section>
   <section id="tab-users" class="tab-panel hidden">
     <div class="admin-panel">
-      <h1>Users</h1>
-      <p>Create users, update roles, and adjust global browser settings.</p>
-      <button type="button" onclick="showUserManagement()" title="Open the existing user management dialog">Open User Management</button>
+      <div class="section-heading">
+        <div>
+          <h1>User Management</h1>
+          <p>Create users, change roles, and manage per-user browser overrides.</p>
+        </div>
+        <button type="button" onclick="loadUserManagementTab()" title="Reload users and general user settings from the server">Reload</button>
+      </div>
+      <div class="subsection-heading">
+        <h2>General User Settings</h2>
+        <p>Set server-wide defaults that affect login access, selector style, and launch troubleshooting.</p>
+      </div>
+      <div class="settings-panel user-settings">
+        <label class="setting-row">
+          <input id="requireMainLogin" type="checkbox">
+          <span title="Require users to log in before the main game browser is shown">Require login</span>
+        </label>
+        <label class="setting-row">
+          <input id="usePopupSelectors" type="checkbox">
+          <span title="Use popup game and save selectors instead of the controller-friendly full-screen menu selector">Popup selectors</span>
+        </label>
+        <label class="setting-row">
+          <input id="launchErrorDebug" type="checkbox">
+          <span title="Show an in-game launch error overlay when a game fails to launch. Useful for troubleshooting; leave off for normal use.">Launch debug</span>
+        </label>
+        <button type="button" onclick="saveAdminSettings()" title="Save the general user settings">Save Settings</button>
+      </div>
+      <div class="subsection-heading">
+        <h2>Users</h2>
+        <p>Create accounts, update roles, reset passwords, and override selector/debug behavior per user.</p>
+      </div>
+      <div class="file-actions modal-actions">
+        <input id="newUser" type="text" placeholder="New username">
+        <input id="newPass" type="password" placeholder="New password">
+        <select id="newRole" title="Role for the new user">
+          <option value="user">User</option>
+          <option value="admin">Admin</option>
+        </select>
+        <button type="button" onclick="createManagedUser()" title="Create the new user profile">Create User</button>
+      </div>
+      <div id="usersList" class="modal-table-wrap"></div>
+    </div>
+  </section>
+  <section id="tab-webhooks" class="tab-panel hidden">
+    <div class="admin-panel">
+      <div class="section-heading">
+        <div>
+          <h1>Webhooks</h1>
+          <p>Configure notification delivery for password requests, activity events, and Nextcloud jobs.</p>
+        </div>
+        <button type="button" onclick="loadAdminSettings()" title="Reload saved webhook and browser settings">Reload</button>
+      </div>
+      <div class="settings-grid">
+        <label title="Webhook URL used for password reset requests, activity events, and Nextcloud backup or restore notifications">
+          <span>Webhook URL</span>
+          <input id="passwordResetWebhook" type="url" placeholder="https://hooks.example.com/event">
+        </label>
+      </div>
+      <div class="file-actions">
+        <button type="button" onclick="saveAdminSettings()" title="Save webhook and browser-wide settings">Save Settings</button>
+        <button type="button" onclick="testPasswordResetWebhook()" title="Send a test webhook payload">Test Payload</button>
+      </div>
     </div>
   </section>
   <section id="tab-nextcloud" class="tab-panel hidden">
@@ -118,7 +177,7 @@
       <div class="section-heading">
         <div>
           <h1>Nextcloud Backup</h1>
-          <p>Configure backup destinations and scheduling. Backup execution starts in Phase 2.</p>
+          <p>Configure backup destinations, scheduling, and server-side backup jobs.</p>
         </div>
         <button type="button" onclick="loadNextcloudSettings()" title="Reload saved Nextcloud backup settings from the server">Reload</button>
       </div>
@@ -194,7 +253,7 @@
           <span>Day of month</span>
           <input id="nextcloudScheduleDayOfMonth" type="number" min="1" max="31" value="1">
         </label>
-        <label class="inline-setting danger-option" title="When mirror sync runs, delete remote files that are no longer present locally inside each selected destination folder. Leave this off unless Nextcloud is only used for this mirror.">
+        <label class="inline-setting danger-option" title="Manual backups only: after you preview and confirm, mirror sync deletes remote files that are no longer present locally inside each selected destination folder. Archive zip files are protected.">
           <input id="nextcloudMirrorDelete" type="checkbox">
           <span>Mirror delete remote extras</span>
         </label>
@@ -203,53 +262,43 @@
       <p class="subtle-copy">Nothing is selected by default. Each checked scope uses its own independent Nextcloud folder.</p>
       <div id="nextcloudScopes" class="scope-list"></div>
       <div id="nextcloudStatus" class="status-panel" role="status">Load settings to see current Nextcloud backup status.</div>
+      <div id="nextcloudJobProgress" class="backup-progress hidden" aria-hidden="true">
+        <div id="nextcloudJobProgressBar" class="backup-progress-bar"></div>
+      </div>
       <div class="file-actions">
         <button type="button" onclick="saveNextcloudSettings()" title="Save Nextcloud backup settings on the server">Save Nextcloud Settings</button>
         <button type="button" onclick="testNextcloudConnection()" title="Check the Nextcloud URL, username, app password, and WebDAV access">Test Connection</button>
-        <button type="button" disabled title="Backup execution will be added in Phase 2">Run Backup Now</button>
+        <button type="button" onclick="previewNextcloudMirrorDelete()" title="Dry-run mirror delete by listing remote files that are not present locally">Preview Mirror Deletes</button>
+        <button type="button" onclick="runNextcloudBackup()" title="Run the selected Nextcloud backup mode now as a server-side job">Run Backup Now</button>
+        <button id="nextcloudStopBackup" class="danger-button hidden" type="button" onclick="cancelNextcloudBackup()" title="Request the running backup job to stop after the current file finishes">Stop Backup</button>
+      </div>
+      <div id="nextcloudMirrorDeletePreview" class="mirror-delete-preview hidden" aria-hidden="true"></div>
+      <div class="restore-panel">
+        <h2>Restore From Nextcloud</h2>
+        <p class="subtle-copy">Phase 7 restores profile archives only. It merges files from the selected zip, overwrites matching local files, and keeps local extras.</p>
+        <div class="restore-grid">
+          <label title="Profiles restores server profile folders, save/state history, favorites sync data, and profile records from an archive backup">
+            <span>Restore scope</span>
+            <select id="nextcloudRestoreScope">
+              <option value="profiles">Profiles, saves, states, and favorites</option>
+            </select>
+          </label>
+          <label title="Archives are read from the Profiles Nextcloud destination folder configured above">
+            <span>Archive</span>
+            <select id="nextcloudRestoreArchive">
+              <option value="">List archives first</option>
+            </select>
+          </label>
+        </div>
+        <div class="file-actions">
+          <button type="button" onclick="listNextcloudArchives()" title="List profile archive zip backups from the configured Nextcloud folder">List Profile Archives</button>
+          <button class="danger-button" type="button" onclick="restoreNextcloudArchive()" title="Start a server-side restore job from the selected archive after confirmation">Restore Selected Archive</button>
+        </div>
       </div>
     </div>
   </section>
   </main>
   </div>
-  <section id="userManagement" class="admin-modal hidden" role="dialog" aria-modal="true" aria-labelledby="userManagementTitle" onclick="handleUserManagementBackdrop(event)">
-    <div class="admin-modal-card">
-      <div class="file-header modal-header">
-        <div>
-          <h1 id="userManagementTitle">User Management</h1>
-          <p>Create users, change roles, and control whether the main game browser requires login.</p>
-        </div>
-        <button type="button" onclick="closeUserManagement()">Close</button>
-      </div>
-      <div class="file-actions modal-actions">
-        <input id="newUser" type="text" placeholder="New username">
-        <input id="newPass" type="password" placeholder="New password">
-        <select id="newRole">
-          <option value="user">User</option>
-          <option value="admin">Admin</option>
-        </select>
-        <button type="button" onclick="createManagedUser()">Create User</button>
-      </div>
-      <div class="settings-panel">
-        <label class="setting-row">
-          <input id="requireMainLogin" type="checkbox">
-          <span title="Require login before showing the main game browser">Require login</span>
-        </label>
-        <label class="setting-row">
-          <input id="usePopupSelectors" type="checkbox">
-          <span title="Use popup game/save selectors instead of the controller-friendly full menu selector">Popup selectors</span>
-        </label>
-        <label class="setting-row">
-          <input id="launchErrorDebug" type="checkbox">
-          <span title="Show in-game launch error overlay for debugging">Launch debug</span>
-        </label>
-        <button type="button" onclick="saveAdminSettings()">Save Settings</button>
-        <input id="passwordResetWebhook" type="url" placeholder="Password reset webhook URL">
-        <button type="button" onclick="testPasswordResetWebhook()">Test Payload</button>
-      </div>
-      <div id="usersList" class="modal-table-wrap"></div>
-    </div>
-  </section>
   <div ondrop="dropFiles(event)" ondragover="allowDrop(event)" style="visibility:hidden;opacity:0" id="dropzone">
   </div>
   </body>

@@ -30,6 +30,7 @@ var nextcloudBackupJobs = new Map();
 var nextcloudMirrorDeletePreviews = new Map();
 var nextcloudBackupSeq = 1;
 var MIN_ARCHIVE_MEMORY_LIMIT_BYTES = 1024 * 1024 * 1024;
+var DEFAULT_ARCHIVE_MEMORY_LIMIT_BYTES = 16 * 1024 * 1024 * 1024;
 var ARCHIVE_MEMORY_SAFETY_RATIO = 0.75;
 app.use(express.json({ limit: '150MB' }));
 
@@ -753,7 +754,9 @@ async function containerMemoryLimitBytes() {
 }
 
 async function archiveMemoryBudgetBytes() {
-  let limit = await containerMemoryLimitBytes();
+  let overrideLimit = parseMemoryLimitValue(process.env.NEXTCLOUD_ARCHIVE_MEMORY_LIMIT_BYTES || '');
+  let overrideBudget = parseMemoryLimitValue(process.env.NEXTCLOUD_ARCHIVE_BUDGET_BYTES || '');
+  let limit = overrideLimit || await containerMemoryLimitBytes() || DEFAULT_ARCHIVE_MEMORY_LIMIT_BYTES;
   if (!limit || limit < MIN_ARCHIVE_MEMORY_LIMIT_BYTES) {
     return {
       limitBytes: limit || 0,
@@ -762,7 +765,7 @@ async function archiveMemoryBudgetBytes() {
   }
   return {
     limitBytes: limit,
-    budgetBytes: Math.floor(limit * ARCHIVE_MEMORY_SAFETY_RATIO)
+    budgetBytes: overrideBudget || Math.floor(limit * ARCHIVE_MEMORY_SAFETY_RATIO)
   };
 }
 

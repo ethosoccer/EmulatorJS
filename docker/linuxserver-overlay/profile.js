@@ -775,7 +775,7 @@ function totalBackupFileBytes(files) {
   }, 0);
 }
 
-function skippedArchiveRecord(scopeId, files, totalBytes, budget) {
+function skippedArchiveRecord(scopeId, files, totalBytes, budget, reason) {
   let limitLabel = budget.limitBytes ? formatBytes(budget.limitBytes) : 'unknown';
   let budgetLabel = budget.budgetBytes ? formatBytes(budget.budgetBytes) : 'unknown';
   return {
@@ -784,8 +784,33 @@ function skippedArchiveRecord(scopeId, files, totalBytes, budget) {
     bytesConsidered: totalBytes,
     memoryLimitBytes: budget.limitBytes || 0,
     archiveBudgetBytes: budget.budgetBytes || 0,
-    reason: 'Archive scope ' + scopeId + ' is ' + formatBytes(totalBytes) + ', above the safe in-memory ZIP budget of ' + budgetLabel + ' for container RAM ' + limitLabel + '.'
+    archiveBytesReserved: budget.archiveBytesReserved || 0,
+    reason: reason || 'Archive scope ' + scopeId + ' is ' + formatBytes(totalBytes) + ', above the safe in-memory ZIP budget of ' + budgetLabel + ' for container RAM ' + limitLabel + '.'
   };
+}
+
+async function skipNextcloudArchiveScope(scopeId, files, totalBytes, budget, summary, job, reason) {
+  let skipped = skippedArchiveRecord(scopeId, files, totalBytes, budget, reason);
+  summary.skippedArchives += 1;
+  summary.archiveSkipDetails.push(skipped);
+  summary.scopeDetails[scopeId].archiveSkipped = true;
+  summary.scopeDetails[scopeId].archiveSkipReason = skipped.reason;
+  console.log('Nextcloud archive skipped:', skipped.reason);
+  if (job) {
+    updateNextcloudJob(job, {
+      message: skipped.reason,
+      summary: summary,
+      progress: Math.max(job.progress || 0, 10)
+    });
+    await persistNextcloudJobStatus(job);
+    await emitBackupActivity(job, 'backup_archive_skipped', 'warning', {
+      reason: skipped.reason,
+      backup: Object.assign(backupActivityPayload(job, 'backup_archive_skipped', 'warning').backup, {
+        skippedArchive: skipped,
+        summary: summary
+      })
+    });
+  }
 }
 
 async function listNextcloudArchiveFiles(settings, remoteFolder, prefix) {
@@ -1013,31 +1038,19 @@ async function runScopeArchiveBackup(settings, scopeId, files, summary, job) {
   let archiveName = prefix + backupTimestampLabel() + '.zip';
   assertNextcloudJobNotCanceled(job);
   let totalBytes = totalBackupFileBytes(files);
-  let budget = await archiveMemoryBudgetBytes();
+  let budget = summary.archiveBudget || await archiveMemoryBudgetBytes();
+  budget.archiveBytesReserved = summary.archiveBytesReserved || 0;
   if (!budget.budgetBytes || totalBytes > budget.budgetBytes) {
-    let skipped = skippedArchiveRecord(scopeId, files, totalBytes, budget);
-    summary.skippedArchives += 1;
-    summary.archiveSkipDetails.push(skipped);
-    summary.scopeDetails[scopeId].archiveSkipped = true;
-    summary.scopeDetails[scopeId].archiveSkipReason = skipped.reason;
-    console.log('Nextcloud archive skipped:', skipped.reason);
-    if (job) {
-      updateNextcloudJob(job, {
-        message: skipped.reason,
-        summary: summary,
-        progress: Math.max(job.progress || 0, 10)
-      });
-      await persistNextcloudJobStatus(job);
-      await emitBackupActivity(job, 'backup_archive_skipped', 'warning', {
-        reason: skipped.reason,
-        backup: Object.assign(backupActivityPayload(job, 'backup_archive_skipped', 'warning').backup, {
-          skippedArchive: skipped,
-          summary: summary
-        })
-      });
-    }
+    await skipNextcloudArchiveScope(scopeId, files, totalBytes, budget, summary, job);
     return;
   }
+  if ((summary.archiveBytesReserved || 0) + totalBytes > budget.budgetBytes) {
+    let reason = 'Archive scope ' + scopeId + ' is ' + formatBytes(totalBytes) + ', and selected archive scopes would reserve ' + formatBytes((summary.archiveBytesReserved || 0) + totalBytes) + ' against the safe in-memory ZIP budget of ' + formatBytes(budget.budgetBytes) + '.';
+    await skipNextcloudArchiveScope(scopeId, files, totalBytes, budget, summary, job, reason);
+    return;
+  }
+  summary.archiveBytesReserved += totalBytes;
+  summary.scopeDetails[scopeId].archiveBytesReserved = totalBytes;
   let buffer = await buildScopeArchive(files);
   assertNextcloudJobNotCanceled(job);
   await putNextcloudFile(settings, path.posix.join(remoteFolder, archiveName), buffer, 'application/zip');
@@ -1090,6 +1103,7 @@ async function runNextcloudBackup(settings, job) {
   assertNextcloudJobNotCanceled(job);
   assertSupportedNextcloudScopes(settings);
   let selectedScopes = selectedNextcloudScopes(settings);
+  let archiveBudget = settings.mode === 'archive' || settings.mode === 'both' ? await archiveMemoryBudgetBytes() : {limitBytes: 0, budgetBytes: 0};
   let summary = {
     mode: settings.mode,
     scopes: selectedScopes,
@@ -1101,6 +1115,8 @@ async function runNextcloudBackup(settings, job) {
     remoteExtrasDeleted: 0,
     skippedArchives: 0,
     archiveSkipDetails: [],
+    archiveBudget: archiveBudget,
+    archiveBytesReserved: 0,
     mirrorDeletePreviewId: job && job.mirrorDeletePreview ? job.mirrorDeletePreview.id : '',
     archiveFiles: [],
     scopeDetails: {}
@@ -1119,6 +1135,7 @@ async function runNextcloudBackup(settings, job) {
       remoteExtrasDeleted: 0,
       archiveSkipped: false,
       archiveSkipReason: '',
+      archiveBytesReserved: 0,
       archiveFiles: []
     };
     if (settings.mode === 'archive' || settings.mode === 'both') {

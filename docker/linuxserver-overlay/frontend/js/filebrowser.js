@@ -337,6 +337,9 @@ function describeNextcloudJob(job) {
   if (summary.skippedArchives) {
     bits.push('Skipped ' + summary.skippedArchives + ' oversized archive scope(s).');
   }
+  if (summary.archiveBudget && summary.archiveBudget.budgetBytes) {
+    bits.push('Archive budget reserved ' + (summary.archiveBytesReserved || 0) + ' of ' + summary.archiveBudget.budgetBytes + ' byte(s).');
+  }
   if (summary.archiveSkipDetails && summary.archiveSkipDetails.length) {
     bits.push(summary.archiveSkipDetails.map(function(skip) {
       return skip.reason || ('Skipped ' + skip.scope + '.');

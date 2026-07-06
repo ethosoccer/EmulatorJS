@@ -722,13 +722,36 @@ function parseMemoryLimitValue(value) {
   return parsed;
 }
 
+function parseMemoryLimitText(value) {
+  let text = String(value || '');
+  let meminfoMatch = text.match(/^MemTotal:\s+(\d+)\s+kB/im);
+  if (meminfoMatch) {
+    return Number(meminfoMatch[1]) * 1024;
+  }
+  return parseMemoryLimitValue(text);
+}
+
 async function readFirstMemoryLimit(paths) {
   for await (let filePath of paths) {
     try {
-      let parsed = parseMemoryLimitValue(await fsw.readFile(filePath, 'utf8'));
+      let parsed = parseMemoryLimitText(await fsw.readFile(filePath, 'utf8'));
       if (parsed > 0) {
         return parsed;
       }
+    } catch(e) {}
+  }
+  return 0;
+}
+
+async function configuredMemoryLimitBytes() {
+  let overrideLimit = parseMemoryLimitValue(process.env.NEXTCLOUD_ARCHIVE_MEMORY_LIMIT_BYTES || '');
+  if (overrideLimit > 0) {
+    return overrideLimit;
+  }
+  let limitFile = String(process.env.NEXTCLOUD_ARCHIVE_MEMORY_LIMIT_FILE || '').trim();
+  if (limitFile) {
+    try {
+      return parseMemoryLimitText(await fsw.readFile(limitFile, 'utf8'));
     } catch(e) {}
   }
   return 0;
@@ -753,9 +776,8 @@ async function containerMemoryLimitBytes() {
 }
 
 async function archiveMemoryBudgetBytes() {
-  let overrideLimit = parseMemoryLimitValue(process.env.NEXTCLOUD_ARCHIVE_MEMORY_LIMIT_BYTES || '');
   let overrideBudget = parseMemoryLimitValue(process.env.NEXTCLOUD_ARCHIVE_BUDGET_BYTES || '');
-  let limit = overrideLimit || await containerMemoryLimitBytes();
+  let limit = await configuredMemoryLimitBytes() || await containerMemoryLimitBytes();
   if (!limit || limit < MIN_ARCHIVE_MEMORY_LIMIT_BYTES) {
     return {
       limitBytes: limit || 0,

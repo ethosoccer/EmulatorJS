@@ -334,6 +334,14 @@ function describeNextcloudJob(job) {
   if (summary.remoteExtrasDeleted) {
     bits.push('Deleted ' + summary.remoteExtrasDeleted + ' remote extra file(s).');
   }
+  if (summary.skippedArchives) {
+    bits.push('Skipped ' + summary.skippedArchives + ' oversized archive scope(s).');
+  }
+  if (summary.archiveSkipDetails && summary.archiveSkipDetails.length) {
+    bits.push(summary.archiveSkipDetails.map(function(skip) {
+      return skip.reason || ('Skipped ' + skip.scope + '.');
+    }).join(' '));
+  }
   if (summary.filesRestored || summary.filesBackedUp || summary.bytesRestored) {
     bits.push('Restored ' + (summary.filesRestored || 0) + ' file(s), backed up ' + (summary.filesBackedUp || 0) + ' overwritten file(s), ' + (summary.bytesRestored || 0) + ' byte(s).');
   }

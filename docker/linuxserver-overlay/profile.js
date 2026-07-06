@@ -29,6 +29,8 @@ var GEO_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 var nextcloudBackupJobs = new Map();
 var nextcloudMirrorDeletePreviews = new Map();
 var nextcloudBackupSeq = 1;
+var MIN_ARCHIVE_MEMORY_LIMIT_BYTES = 1024 * 1024 * 1024;
+var ARCHIVE_MEMORY_SAFETY_RATIO = 0.75;
 app.use(express.json({ limit: '150MB' }));
 
 function roleFor(profileRecord) {
@@ -697,6 +699,92 @@ async function buildScopeArchive(files) {
   });
 }
 
+function formatBytes(bytes) {
+  let value = Number(bytes || 0);
+  let units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let index = 0;
+  while (value >= 1024 && index < units.length - 1) {
+    value = value / 1024;
+    index++;
+  }
+  return (index === 0 ? String(Math.round(value)) : value.toFixed(value >= 10 ? 1 : 2)) + ' ' + units[index];
+}
+
+function parseMemoryLimitValue(value) {
+  let clean = String(value || '').trim();
+  if (!clean || clean === 'max') {
+    return 0;
+  }
+  let parsed = Number(clean);
+  if (!Number.isFinite(parsed) || parsed <= 0 || parsed > Number.MAX_SAFE_INTEGER) {
+    return 0;
+  }
+  return parsed;
+}
+
+async function readFirstMemoryLimit(paths) {
+  for await (let filePath of paths) {
+    try {
+      let parsed = parseMemoryLimitValue(await fsw.readFile(filePath, 'utf8'));
+      if (parsed > 0) {
+        return parsed;
+      }
+    } catch(e) {}
+  }
+  return 0;
+}
+
+async function containerMemoryLimitBytes() {
+  let cgroupLimit = await readFirstMemoryLimit([
+    '/sys/fs/cgroup/memory.max',
+    '/sys/fs/cgroup/memory/memory.limit_in_bytes'
+  ]);
+  if (cgroupLimit > 0 && cgroupLimit < 9000000000000000) {
+    return cgroupLimit;
+  }
+  try {
+    let meminfo = await fsw.readFile('/proc/meminfo', 'utf8');
+    let match = meminfo.match(/^MemTotal:\s+(\d+)\s+kB/im);
+    if (match) {
+      return Number(match[1]) * 1024;
+    }
+  } catch(e) {}
+  return 0;
+}
+
+async function archiveMemoryBudgetBytes() {
+  let limit = await containerMemoryLimitBytes();
+  if (!limit || limit < MIN_ARCHIVE_MEMORY_LIMIT_BYTES) {
+    return {
+      limitBytes: limit || 0,
+      budgetBytes: 0
+    };
+  }
+  return {
+    limitBytes: limit,
+    budgetBytes: Math.floor(limit * ARCHIVE_MEMORY_SAFETY_RATIO)
+  };
+}
+
+function totalBackupFileBytes(files) {
+  return (files || []).reduce(function(total, file) {
+    return total + Number(file && file.stat && file.stat.size || 0);
+  }, 0);
+}
+
+function skippedArchiveRecord(scopeId, files, totalBytes, budget) {
+  let limitLabel = budget.limitBytes ? formatBytes(budget.limitBytes) : 'unknown';
+  let budgetLabel = budget.budgetBytes ? formatBytes(budget.budgetBytes) : 'unknown';
+  return {
+    scope: scopeId,
+    filesConsidered: files.length,
+    bytesConsidered: totalBytes,
+    memoryLimitBytes: budget.limitBytes || 0,
+    archiveBudgetBytes: budget.budgetBytes || 0,
+    reason: 'Archive scope ' + scopeId + ' is ' + formatBytes(totalBytes) + ', above the safe in-memory ZIP budget of ' + budgetLabel + ' for container RAM ' + limitLabel + '.'
+  };
+}
+
 async function listNextcloudArchiveFiles(settings, remoteFolder, prefix) {
   let response = await nextcloudRequest(
     settings,
@@ -921,6 +1009,32 @@ async function runScopeArchiveBackup(settings, scopeId, files, summary, job) {
   let prefix = scopeArchivePrefix(scopeId);
   let archiveName = prefix + backupTimestampLabel() + '.zip';
   assertNextcloudJobNotCanceled(job);
+  let totalBytes = totalBackupFileBytes(files);
+  let budget = await archiveMemoryBudgetBytes();
+  if (!budget.budgetBytes || totalBytes > budget.budgetBytes) {
+    let skipped = skippedArchiveRecord(scopeId, files, totalBytes, budget);
+    summary.skippedArchives += 1;
+    summary.archiveSkipDetails.push(skipped);
+    summary.scopeDetails[scopeId].archiveSkipped = true;
+    summary.scopeDetails[scopeId].archiveSkipReason = skipped.reason;
+    console.log('Nextcloud archive skipped:', skipped.reason);
+    if (job) {
+      updateNextcloudJob(job, {
+        message: skipped.reason,
+        summary: summary,
+        progress: Math.max(job.progress || 0, 10)
+      });
+      await persistNextcloudJobStatus(job);
+      await emitBackupActivity(job, 'backup_archive_skipped', 'warning', {
+        reason: skipped.reason,
+        backup: Object.assign(backupActivityPayload(job, 'backup_archive_skipped', 'warning').backup, {
+          skippedArchive: skipped,
+          summary: summary
+        })
+      });
+    }
+    return;
+  }
   let buffer = await buildScopeArchive(files);
   assertNextcloudJobNotCanceled(job);
   await putNextcloudFile(settings, path.posix.join(remoteFolder, archiveName), buffer, 'application/zip');
@@ -982,6 +1096,8 @@ async function runNextcloudBackup(settings, job) {
     bytesUploaded: 0,
     retentionDeleted: 0,
     remoteExtrasDeleted: 0,
+    skippedArchives: 0,
+    archiveSkipDetails: [],
     mirrorDeletePreviewId: job && job.mirrorDeletePreview ? job.mirrorDeletePreview.id : '',
     archiveFiles: [],
     scopeDetails: {}
@@ -998,6 +1114,8 @@ async function runNextcloudBackup(settings, job) {
       bytesUploaded: 0,
       retentionDeleted: 0,
       remoteExtrasDeleted: 0,
+      archiveSkipped: false,
+      archiveSkipReason: '',
       archiveFiles: []
     };
     if (settings.mode === 'archive' || settings.mode === 'both') {
@@ -1215,12 +1333,13 @@ async function runNextcloudBackupJob(job, settings) {
   await emitBackupActivity(job, 'backup_start', 'started');
   try {
     let summary = await runNextcloudBackup(settings, job);
+    let skipText = summary.skippedArchives ? ' Skipped ' + summary.skippedArchives + ' oversized archive scope(s).' : '';
     updateNextcloudJob(job, {
       status: 'success',
       completedAt: new Date().toISOString(),
       progress: 100,
       summary: summary,
-      message: 'Backup completed. Uploaded ' + summary.filesUploaded + ' file(s), ' + summary.archivesUploaded + ' archive(s), deleted ' + summary.remoteExtrasDeleted + ' remote extra file(s), ' + summary.bytesUploaded + ' byte(s).'
+      message: 'Backup completed. Uploaded ' + summary.filesUploaded + ' file(s), ' + summary.archivesUploaded + ' archive(s), deleted ' + summary.remoteExtrasDeleted + ' remote extra file(s), ' + summary.bytesUploaded + ' byte(s).' + skipText
     });
     await persistNextcloudJobStatus(job);
     await emitBackupActivity(job, 'backup_complete', 'succeeded', {backup: Object.assign(backupActivityPayload(job, 'backup_complete', 'succeeded').backup, {summary: summary})});
@@ -1391,6 +1510,47 @@ async function checkNextcloudSchedule() {
   }
 }
 
+async function markStaleNextcloudRunningStatus() {
+  try {
+    let settings = await readSettings();
+    settings.nextcloud = normalizeNextcloudSettings(settings.nextcloud || {}, settings.nextcloud);
+    let last = settings.nextcloud.lastStatus || {};
+    if (last.status !== 'running' && last.status !== 'queued' && last.status !== 'canceling') {
+      return;
+    }
+    let completedAt = new Date().toISOString();
+    let message = 'Previous Nextcloud backup did not finish before the service restarted. It was marked failed so a new backup can run.';
+    settings.nextcloud.lastStatus = Object.assign({}, last, {
+      status: 'error',
+      message: message,
+      completedAt: completedAt
+    });
+    await writeSettings(settings);
+    let job = {
+      id: last.jobId || 'nextcloud-stale-' + Date.now(),
+      kind: last.kind || 'backup',
+      status: 'error',
+      mode: settings.nextcloud.mode || '',
+      scopes: selectedNextcloudScopes(settings.nextcloud),
+      startedAt: last.startedAt || '',
+      completedAt: completedAt,
+      requestedBy: 'system',
+      message: message,
+      requestContext: schedulerRequestContext()
+    };
+    console.log('Nextcloud backup stale running status marked failed:', message);
+    await emitBackupActivity(job, 'backup_stale_failed', 'failed', {
+      reason: message,
+      backup: Object.assign(backupActivityPayload(job, 'backup_stale_failed', 'failed').backup, {
+        error: message
+      })
+    });
+  } catch(e) {
+    console.log('Unable to mark stale Nextcloud backup status', e);
+  }
+}
+
+markStaleNextcloudRunningStatus();
 setInterval(checkNextcloudSchedule, 60 * 1000);
 setTimeout(checkNextcloudSchedule, 15 * 1000);
 

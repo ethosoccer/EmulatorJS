@@ -1,4 +1,4 @@
-FROM lscr.io/linuxserver/emulatorjs:latest
+FROM lscr.io/linuxserver/emulatorjs@sha256:9dc5be824f956c727c95a9470b049008b4f6a13eaa0b1c67bdf7b70879794c24
 
 COPY index.js /emulatorjs/index.js
 COPY profile.js /emulatorjs/profile.js

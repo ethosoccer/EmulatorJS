@@ -72,6 +72,12 @@ The overlay replaces `/etc/nginx/site-confs/default` to make the frontend shell 
 
 The frontend and admin HTML also use versioned CSS/JS URLs so new overlay builds force browsers to request the updated entrypoint files.
 
+### Nextcloud Archive Backup Memory Guard
+
+Nextcloud archive backups build ZIP files in memory. Before creating archive ZIPs, the backup job checks the runtime memory limit and reserves one shared archive budget for the whole run. By default the budget is 75% of the detected memory limit; archive scopes that individually exceed the budget, or that would push the cumulative selected archive input over the budget, are skipped and reported through the backup activity log, webhook, and Influx pipeline.
+
+Normal Docker installs should be detected from the container cgroup limit. If Docker is running inside another container or VM and cannot see the outer memory cap, set `NEXTCLOUD_ARCHIVE_MEMORY_LIMIT_BYTES` on the EmulatorJS container. Set `NEXTCLOUD_ARCHIVE_BUDGET_BYTES` only if you want to override the computed 75% budget directly.
+
 ## Build
 
 From the repository root:
